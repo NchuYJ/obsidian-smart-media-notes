@@ -201,43 +201,50 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
         />
       </div>
 
-      {/* 当前字幕 banner — 视频/音频统一：播放器下方内联显示，不遮盖画面 */}
-      {activeSubtitle && showSubtitleOverlay && (
-        <div
-          style={{
-            flex: "0 0 auto",
-            padding: "14px 16px",
-            borderTop: "1px solid var(--background-modifier-border)",
-            borderBottom: "1px solid var(--background-modifier-border)",
-            background: "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)",
-            color: "var(--text-normal)",
-            fontSize: fs.text,
-            lineHeight: "1.6",
-            fontWeight: 500,
-            minHeight: "4.5em",
-            maxHeight: "4.5em",
-            overflow: "hidden",
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 0,
-          }}
-        >
-          <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
-            color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
-            background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px",
-            flexShrink: 0, alignSelf: "flex-start" }}>
-            {formatSecondsAsTimestamp(activeSubtitle.start)}
-          </span>
-          <span style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}>
-            {activeSubtitle.text}
-          </span>
-        </div>
-      )}
+      {/* 当前字幕 banner — 始终占位，避免出现/消失时布局抖动 */}
+      <div
+        style={{
+          flex: "0 0 auto",
+          minHeight: "4.5em",
+          maxHeight: "4.5em",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 0,
+          padding: activeSubtitle && showSubtitleOverlay ? "14px 16px" : 0,
+          borderTop: activeSubtitle && showSubtitleOverlay
+            ? "1px solid var(--background-modifier-border)" : "none",
+          borderBottom: activeSubtitle && showSubtitleOverlay
+            ? "1px solid var(--background-modifier-border)" : "none",
+          background: activeSubtitle && showSubtitleOverlay
+            ? "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)"
+            : "transparent",
+          color: "var(--text-normal)",
+          fontSize: fs.text,
+          lineHeight: "1.6",
+          fontWeight: 500,
+          transition: "padding 0.15s, border 0.15s, background 0.15s",
+        }}
+      >
+        {activeSubtitle && showSubtitleOverlay && (
+          <>
+            <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
+              color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
+              background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px",
+              flexShrink: 0, alignSelf: "flex-start" }}>
+              {formatSecondsAsTimestamp(activeSubtitle.start)}
+            </span>
+            <span style={{
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}>
+              {activeSubtitle.text}
+            </span>
+          </>
+        )}
+      </div>
 
       {/* 播放列表导航 */}
       {playlist && (
