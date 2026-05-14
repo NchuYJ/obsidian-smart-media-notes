@@ -32,6 +32,8 @@ import {
   isPlayableMedia,
   MEDIA_EXTENSIONS,
   isAudioFile,
+  compareDictation,
+  formatDictationResult,
   SubtitleCue,
   ResolvedMedia,
 } from "./utils";
@@ -59,6 +61,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
   recordedChunks: Blob[] = [];
   liveTranscript: string = "";
   speechRecognition: any = null;
+
+  // 听写模式
+  dictationMode: boolean = false;
+  dictationLoopTimer: any = null;
 
   async onload(): Promise<void> {
     this.registerView(VIDEO_VIEW, (leaf) => new VideoView(leaf));
@@ -466,10 +472,64 @@ export default class SmartMediaNotesPlugin extends Plugin {
       },
     });
 
+    // ---- 听写模式命令 ----
+    this.addCommand({
+      id: "toggle-dictation",
+      name: "Toggle dictation mode",
+      callback: () => {
+        this.dictationMode = !this.dictationMode;
+        if (!this.dictationMode) {
+          this.stopDictationLoop();
+        }
+        // 刷新所有播放器视图以更新 UI
+        const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
+        leaves.forEach((leaf) => {
+          if (leaf.view instanceof VideoView && leaf.view.currentEphemeralState) {
+            leaf.setEphemeralState({
+              ...leaf.view.currentEphemeralState,
+              dictationMode: this.dictationMode,
+            });
+          }
+        });
+        new Notice(
+          this.dictationMode
+            ? "Dictation mode ON — subtitles hidden, segment loops"
+            : "Dictation mode OFF",
+        );
+      },
+    });
+
+    this.addCommand({
+      id: "dictation-reveal",
+      name: "Reveal dictation answer (compare with selected text)",
+      editorCallback: (editor: Editor) => {
+        if (!this.dictationMode) {
+          new Notice("Enable dictation mode first.");
+          return;
+        }
+        if (!this.currentSubtitle) {
+          new Notice("No active subtitle to compare.");
+          return;
+        }
+        const selected = editor.getSelection().trim();
+        if (!selected) {
+          new Notice("Select your typed text in the editor first.");
+          return;
+        }
+        const diff = compareDictation(selected, this.currentSubtitle.text);
+        const result = formatDictationResult(diff, this.currentSubtitle.text);
+        editor.replaceSelection(result);
+        if (diff.allCorrect) {
+          new Notice("Perfect! All words correct.");
+        }
+      },
+    });
+
     this.addSettingTab(new TimestampPluginSettingTab(this.app, this));
   }
 
   async onunload(): Promise<void> {
+    this.stopDictationLoop();
     this.player = null;
     this.editor = null;
     this.setPlaying = null;
@@ -484,6 +544,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
     }
     this.app.workspace.detachLeavesOfType(VIDEO_VIEW);
     this.app.workspace.detachLeavesOfType(LIBRARY_VIEW);
+  }
+
+  // ---- Dictation mode helpers ----
+  stopDictationLoop(): void {
+    this.dictationMode = false;
+    if (this.dictationLoopTimer) {
+      clearInterval(this.dictationLoopTimer);
+      this.dictationLoopTimer = null;
+    }
   }
 
   // ---- System file resolution ----
@@ -1153,6 +1222,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
             _plugin.settings.showSubtitleBrowser !== false,
           subtitleOverlayFontSize:
             _plugin.settings.subtitleOverlayFontSize || "large",
+          dictationMode: _plugin.dictationMode,
           playlist: vaultFile
             ? _plugin.buildPlaylist(vaultFile)
             : null,

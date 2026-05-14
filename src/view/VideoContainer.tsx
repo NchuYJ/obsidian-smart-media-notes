@@ -33,6 +33,8 @@ interface VideoContainerProps {
   onNavigatePlaylist?: (file: any) => void;
   // 由外部指定是否为音频（本地文件的 blob URL 无法通过扩展名检测）
   isAudio?: boolean;
+  // 听写模式
+  dictationMode?: boolean;
 }
 
 // ---- 组件 ----
@@ -50,6 +52,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   onNavigatePlaylist,
   isAudio: isAudioProp,
   subtitleOverlayFontSize = "large",
+  dictationMode = false,
 }) => {
   const playerRef = useRef<any>();
   const subtitleListRef = useRef<HTMLDivElement>(null);
@@ -91,10 +94,17 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   };
 
   const handleProgress = (state: { playedSeconds: number }) => {
-    const nextSubtitle = findCueAtTime(subtitles || [], state.playedSeconds || 0);
+    const currentTime = state.playedSeconds || 0;
+    const nextSubtitle = findCueAtTime(subtitles || [], currentTime);
     if (nextSubtitle?.start !== activeSubtitle?.start) {
       setActiveSubtitle(nextSubtitle);
       onSubtitleChange(nextSubtitle);
+    }
+    // 听写模式：循环当前字幕片段
+    if (dictationMode && activeSubtitle && playerRef.current) {
+      if (currentTime >= activeSubtitle.end) {
+        playerRef.current.seekTo(activeSubtitle.start);
+      }
     }
   };
 
@@ -211,14 +221,16 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           display: "flex",
           alignItems: "flex-start",
           gap: 0,
-          padding: activeSubtitle && showSubtitleOverlay ? "14px 16px" : 0,
-          borderTop: activeSubtitle && showSubtitleOverlay
+          padding: activeSubtitle && showSubtitleOverlay && !dictationMode ? "14px 16px" : 0,
+          borderTop: activeSubtitle && showSubtitleOverlay && !dictationMode
             ? "1px solid var(--background-modifier-border)" : "none",
-          borderBottom: activeSubtitle && showSubtitleOverlay
+          borderBottom: activeSubtitle && showSubtitleOverlay && !dictationMode
             ? "1px solid var(--background-modifier-border)" : "none",
-          background: activeSubtitle && showSubtitleOverlay
+          background: activeSubtitle && showSubtitleOverlay && !dictationMode
             ? "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)"
-            : "transparent",
+            : dictationMode
+              ? "var(--background-modifier-error)"
+              : "transparent",
           color: "var(--text-normal)",
           fontSize: fs.text,
           lineHeight: "1.6",
@@ -226,7 +238,12 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           transition: "padding 0.15s, border 0.15s, background 0.15s",
         }}
       >
-        {activeSubtitle && showSubtitleOverlay && (
+        {dictationMode ? (
+          <span style={{ fontSize: fs.ts, fontWeight: 700, color: "var(--text-error)",
+            textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            Dictation Mode — Listen and type in your note. Use "Reveal answer" to compare.
+          </span>
+        ) : activeSubtitle && showSubtitleOverlay ? (
           <>
             <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
               color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
@@ -243,7 +260,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
               {activeSubtitle.text}
             </span>
           </>
-        )}
+        ) : null}
       </div>
 
       {/* 播放列表导航 */}
@@ -306,7 +323,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
       )}
 
       {/* 字幕浏览器 */}
-      {hasSubtitles && showSubtitleBrowser && (
+      {hasSubtitles && showSubtitleBrowser && !dictationMode && (
         <div ref={subtitleListRef} style={subtitleStyle}>
           <div
             style={{
