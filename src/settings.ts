@@ -1,29 +1,50 @@
+/**
+ * settings.ts — 设置面板 + 默认配置
+ *
+ * Obsidian 插件的设置系统由三部分组成：
+ *   1. DEFAULT_SETTINGS — 所有配置项的默认值
+ *   2. SmartMediaNotesSettings 接口 — TypeScript 类型定义
+ *   3. TimestampPluginSettingTab — 设置面板 UI（用 Obsidian 的 Setting API 构建）
+ *
+ * 数据流：
+ *   用户修改设置 → PluginSettingTab.onChange() → plugin.saveSettings() → data.json
+ *   插件启动 → plugin.loadSettings() → data.json → plugin.settings
+ */
+
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type SmartMediaNotesPlugin from "./main";
 
+// ============================================================
+// 设置接口 — 定义所有配置项的类型
+// ============================================================
+
 export interface SmartMediaNotesSettings {
-  noteTitle: string;
-  urlStartTimeMap: Map<string, number>;
-  urlColor: string;
-  timestampColor: string;
-  urlTextColor: string;
-  timestampTextColor: string;
-  forwardSeek: string;
-  backwardsSeek: string;
-  recordingsFolder: string;
-  subtitleTemplate: string;
-  enableLiveTranscription: boolean;
-  showSubtitleOverlay: boolean;
-  showSubtitleBrowser: boolean;
-  includeSubtitleWithTimestamp: boolean;
-  timestampWithSubtitleTemplate: string;
-  subtitleStorageFolder: string;
-  rssSubscriptions: Array<{ title: string; url: string } | string>;
-  mediaFolders: string[];
-  autoInsertLibraryNote: boolean;
-  subtitleFileMap: Record<string, string>;
-  subtitleLibrary: Record<string, any[]>;
+  noteTitle: string;              // 打开媒体时自动插入的标题模板
+  urlStartTimeMap: Map<string, number>;  // URL → 上次播放位置的映射
+  urlColor: string;               // URL 按钮颜色
+  timestampColor: string;         // 时间戳按钮颜色
+  urlTextColor: string;           // URL 按钮文字颜色
+  timestampTextColor: string;     // 时间戳按钮文字颜色
+  forwardSeek: string;            // 快进秒数（字符串存储，取值时 parseInt）
+  backwardsSeek: string;          // 快退秒数
+  recordingsFolder: string;       // 录音保存目录
+  subtitleTemplate: string;       // 字幕笔记模板（{time} 和 {text} 占位符）
+  enableLiveTranscription: boolean; // 是否启用实时语音转文字
+  showSubtitleOverlay: boolean;   // 字幕叠加层开关
+  showSubtitleBrowser: boolean;   // 字幕列表开关
+  includeSubtitleWithTimestamp: boolean; // 插入时间戳时是否附上字幕文本
+  timestampWithSubtitleTemplate: string; // 附字幕时的模板
+  subtitleStorageFolder: string;  // 字幕文件保存目录
+  rssSubscriptions: Array<{ title: string; url: string } | string>; // RSS 订阅列表
+  mediaFolders: string[];         // 媒体文件夹列表
+  autoInsertLibraryNote: boolean; // 从媒体库点击时是否自动插入笔记
+  subtitleFileMap: Record<string, string>;   // URL → 字幕文件路径
+  subtitleLibrary: Record<string, any[]>;     // URL → 字幕数据缓存
 }
+
+// ============================================================
+// 默认设置 — 插件首次安装时的初始值
+// ============================================================
 
 export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   noteTitle: "",
@@ -48,17 +69,14 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   subtitleLibrary: {},
 };
 
+// ============================================================
+// 颜色和时间选项 — 下拉菜单的可选值
+// ============================================================
+
 const COLORS: Record<string, string> = {
-  blue: "blue",
-  red: "red",
-  green: "green",
-  yellow: "yellow",
-  orange: "orange",
-  purple: "purple",
-  pink: "pink",
-  grey: "grey",
-  black: "black",
-  white: "white",
+  blue: "blue", red: "red", green: "green", yellow: "yellow",
+  orange: "orange", purple: "purple", pink: "pink", grey: "grey",
+  black: "black", white: "white",
 };
 
 const TIMES: Record<string, string> = {
@@ -69,6 +87,10 @@ const TIMES: Record<string, string> = {
   "105": "105", "110": "110", "115": "115", "120": "120",
 };
 
+// ============================================================
+// 设置面板 UI
+// ============================================================
+
 export class TimestampPluginSettingTab extends PluginSettingTab {
   plugin: SmartMediaNotesPlugin;
 
@@ -77,16 +99,30 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
+  /**
+   * display() 是 PluginSettingTab 的核心方法
+   * Obsidian 在用户打开设置面板时调用它来渲染 UI
+   *
+   * Obsidian Setting API 的链式调用模式：
+   *   new Setting(containerEl)  // 创建一个设置项
+   *     .setName("标题")         // 设置项名称
+   *     .setDesc("描述")         // 设置项描述（灰色小字）
+   *     .addText(text => ...)   // 添加输入控件（text/dropdown/toggle/textarea）
+   *     .onChange(async val => { // 值变化时保存
+   *       plugin.settings.xxx = val;
+   *       await plugin.saveSettings();
+   *     })
+   */
   display(): void {
     const { containerEl } = this;
-    containerEl.empty();
+    containerEl.empty(); // 清空旧内容（每次打开设置面板都会调用 display）
+
     containerEl.createEl("h2", { text: "Timestamp Notes Plugin" });
 
+    // ---- 标题模板 ----
     new Setting(containerEl)
       .setName("Title")
-      .setDesc(
-        "This title will be printed after opening a video with the hotkey. Use <br> for new lines.",
-      )
+      .setDesc("This title will be printed after opening a video with the hotkey. Use <br> for new lines.")
       .addText((text) =>
         text
           .setPlaceholder("Enter title template.")
@@ -94,15 +130,18 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.noteTitle = value;
             await this.plugin.saveSettings();
+            // saveSettings() 调用 Obsidian 的 saveData() 写入 data.json
           }),
       );
 
+    // ---- 颜色设置 ----
+    // addDropdown() 创建下拉菜单
     new Setting(containerEl)
       .setName("URL Button Color")
       .setDesc("Pick a color for the url button.")
       .addDropdown((dropdown) =>
         dropdown
-          .addOptions(COLORS)
+          .addOptions(COLORS)  // addOptions 接受 Record<string, string>
           .setValue(this.plugin.settings.urlColor)
           .onChange(async (value) => {
             this.plugin.settings.urlColor = value;
@@ -149,11 +188,10 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ---- 跳转时间 ----
     new Setting(containerEl)
       .setName("Forward time seek")
-      .setDesc(
-        "This is the amount of seconds the video will seek forward when pressing the seek forward command.",
-      )
+      .setDesc("This is the amount of seconds the video will seek forward when pressing the seek forward command.")
       .addDropdown((dropdown) =>
         dropdown
           .addOptions(TIMES)
@@ -166,9 +204,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Backwards time seek")
-      .setDesc(
-        "This is the amount of seconds the video will seek backwards when pressing the seek backwards command.",
-      )
+      .setDesc("This is the amount of seconds the video will seek backwards when pressing the seek backwards command.")
       .addDropdown((dropdown) =>
         dropdown
           .addOptions(TIMES)
@@ -179,27 +215,27 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ---- 录音设置 ----
     new Setting(containerEl)
       .setName("Voice recordings folder")
-      .setDesc(
-        "Saved audio recordings will be written to this vault folder.",
-      )
+      .setDesc("Saved audio recordings will be written to this vault folder.")
       .addText((text) =>
         text
           .setPlaceholder("Attachments/voice-notes")
           .setValue(this.plugin.settings.recordingsFolder)
           .onChange(async (value) => {
+            // trim() 并回退到默认值 — 防止空字符串
             this.plugin.settings.recordingsFolder =
               value.trim() || DEFAULT_SETTINGS.recordingsFolder!;
             await this.plugin.saveSettings();
           }),
       );
 
+    // ---- 字幕模板 ----
+    // addTextArea() 创建多行文本框
     new Setting(containerEl)
       .setName("Subtitle note template")
-      .setDesc(
-        "Use {time} and {text} placeholders when inserting the active subtitle into your note.",
-      )
+      .setDesc("Use {time} and {text} placeholders when inserting the active subtitle into your note.")
       .addTextArea((text) =>
         text
           .setPlaceholder("> [!quote] {time}\n> {text}")
@@ -211,11 +247,11 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ---- 开关设置 ----
+    // addToggle() 创建开关控件
     new Setting(containerEl)
       .setName("Live transcription")
-      .setDesc(
-        "When supported by the embedded browser engine, record voice notes with realtime speech recognition.",
-      )
+      .setDesc("When supported by the embedded browser engine, record voice notes with realtime speech recognition.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.enableLiveTranscription)
@@ -227,9 +263,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Subtitle overlay")
-      .setDesc(
-        "Show the current subtitle as an overlay on the video during playback.",
-      )
+      .setDesc("Show the current subtitle as an overlay on the video during playback.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showSubtitleOverlay)
@@ -241,9 +275,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Subtitle browser")
-      .setDesc(
-        "Show the scrollable subtitle list panel below the video.",
-      )
+      .setDesc("Show the scrollable subtitle list panel below the video.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.showSubtitleBrowser)
@@ -255,9 +287,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Subtitle storage folder")
-      .setDesc(
-        "Imported subtitle files are saved to this vault folder so they sync across devices.",
-      )
+      .setDesc("Imported subtitle files are saved to this vault folder so they sync across devices.")
       .addText((text) =>
         text
           .setPlaceholder("Subtitles")
@@ -269,18 +299,17 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ---- RSS 订阅 ----
+    // addTextArea 用于多行输入 — 每行一个 feed
     new Setting(containerEl)
       .setName("RSS subscriptions")
-      .setDesc(
-        "One per line. Use `Title | URL` or just the RSS URL. These feeds appear in the right sidebar library.",
-      )
+      .setDesc("One per line. Use `Title | URL` or just the RSS URL. These feeds appear in the right sidebar library.")
       .addTextArea((text) =>
         text
-          .setPlaceholder(
-            "Office Ladies | https://feeds.megaphone.fm/office-ladies",
-          )
+          .setPlaceholder("Office Ladies | https://feeds.megaphone.fm/office-ladies")
           .setValue(this.plugin.stringifyRssSubscriptions())
           .onChange(async (value) => {
+            // 解析输入 → 同时更新设置和刷新侧边栏
             this.plugin.settings.rssSubscriptions =
               this.plugin.parseRssSubscriptions(value);
             await this.plugin.saveSettings();
@@ -288,11 +317,10 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           }),
       );
 
+    // ---- 媒体文件夹 ----
     new Setting(containerEl)
       .setName("Media folders")
-      .setDesc(
-        "One path per line. Supports vault folders and Windows folder paths. These folders appear in the right sidebar library.",
-      )
+      .setDesc("One path per line. Supports vault folders and Windows folder paths. These folders appear in the right sidebar library.")
       .addTextArea((text) =>
         text
           .setPlaceholder(
@@ -311,9 +339,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Auto insert library note")
-      .setDesc(
-        "When enabled, clicking a Smart Media Library item also inserts the timestamp-url block and source line into the active markdown editor.",
-      )
+      .setDesc("When enabled, clicking a Smart Media Library item also inserts the timestamp-url block and source line into the active markdown editor.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.autoInsertLibraryNote)
@@ -325,9 +351,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Include subtitle with timestamp")
-      .setDesc(
-        "When inserting a timestamp, also insert the corresponding subtitle text (useful for language learning).",
-      )
+      .setDesc("When inserting a timestamp, also insert the corresponding subtitle text (useful for language learning).")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.includeSubtitleWithTimestamp)
@@ -339,9 +363,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Timestamp + subtitle template")
-      .setDesc(
-        "Template for the subtitle line appended after the timestamp code block. Use {time} and {text} placeholders.",
-      )
+      .setDesc("Template for the subtitle line appended after the timestamp code block. Use {time} and {text} placeholders.")
       .addTextArea((text) =>
         text
           .setPlaceholder("> {time} {text}")
