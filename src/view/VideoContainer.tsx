@@ -214,14 +214,27 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             fontSize: fs.text,
             lineHeight: "1.6",
             fontWeight: 500,
+            maxHeight: "4.5em",
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 0,
           }}
         >
           <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
             color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
-            background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px" }}>
+            background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px",
+            flexShrink: 0, alignSelf: "flex-start" }}>
             {formatSecondsAsTimestamp(activeSubtitle.start)}
           </span>
-          {activeSubtitle.text}
+          <span style={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}>
+            {activeSubtitle.text}
+          </span>
         </div>
       )}
 
