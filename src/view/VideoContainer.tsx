@@ -199,35 +199,10 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             )
           }
         />
-
-        {/* 字幕叠加层 — 视频：绝对定位浮于底部；音频：内联 banner 不遮盖控制栏 */}
-        {activeSubtitle && showSubtitleOverlay && (
-          !audio ? (
-            <div
-              style={{
-                position: "absolute",
-                left: "16px",
-                right: "16px",
-                bottom: "18px",
-                padding: "10px 14px",
-                borderRadius: "12px",
-                background: "rgba(0, 0, 0, 0.72)",
-                color: "white",
-                fontSize: fs.text,
-                lineHeight: "1.45",
-                textAlign: "center",
-                pointerEvents: "none",
-                backdropFilter: "blur(6px)",
-              }}
-            >
-              {activeSubtitle.text}
-            </div>
-          ) : null
-        )}
       </div>
 
-      {/* 音频字幕 banner — 播放器与字幕列表之间，不遮盖控制栏 */}
-      {audio && activeSubtitle && showSubtitleOverlay && (
+      {/* 当前字幕 banner — 视频/音频统一：播放器下方内联显示，不遮盖画面 */}
+      {activeSubtitle && showSubtitleOverlay && (
         <div
           style={{
             flex: "0 0 auto",
