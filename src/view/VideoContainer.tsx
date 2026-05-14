@@ -35,6 +35,8 @@ interface VideoContainerProps {
   isAudio?: boolean;
   // 听写模式
   dictationMode?: boolean;
+  dictationLoopCount?: number;  // 0=无限
+  dictationLoopGap?: number;    // 间隔秒数
 }
 
 // ---- 组件 ----
@@ -53,11 +55,23 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   isAudio: isAudioProp,
   subtitleOverlayFontSize = "large",
   dictationMode = false,
+  dictationLoopCount = 0,
+  dictationLoopGap = 0.5,
 }) => {
   const playerRef = useRef<any>();
   const subtitleListRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
+
+  // 听写循环状态
+  const loopCountRef = useRef(0);
+  const loopPauseRef = useRef(false);
+
+  // 当字幕变化时重置循环计数
+  useEffect(() => {
+    loopCountRef.current = 0;
+    loopPauseRef.current = false;
+  }, [activeSubtitle?.start]);
 
   // 音频模式：优先用外部传入的 isAudio（本地文件 blob URL 无法通过扩展名检测）
   const audio = isAudioProp ?? isAudioFile(url);
@@ -100,10 +114,30 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
       setActiveSubtitle(nextSubtitle);
       onSubtitleChange(nextSubtitle);
     }
-    // 听写模式：循环当前字幕片段
+    // 听写模式：循环当前字幕片段（支持次数限制+间隔）
     if (dictationMode && activeSubtitle && playerRef.current) {
-      if (currentTime >= activeSubtitle.end) {
-        playerRef.current.seekTo(activeSubtitle.start);
+      const endTime = activeSubtitle.end;
+      const startTime = activeSubtitle.start;
+      if (currentTime >= endTime && !loopPauseRef.current) {
+        const maxCount = dictationLoopCount || 0;
+        loopCountRef.current++;
+        if (maxCount > 0 && loopCountRef.current >= maxCount) {
+          // 达到最大循环次数 → 跳到下一句
+          const idx = (subtitles || []).findIndex((c) => c.start === activeSubtitle.start);
+          if (idx >= 0 && idx < (subtitles || []).length - 1) {
+            playerRef.current.seekTo(subtitles![idx + 1].start);
+          }
+          loopCountRef.current = 0;
+        } else {
+          // 插入间隔暂停
+          loopPauseRef.current = true;
+          setTimeout(() => {
+            if (playerRef.current) {
+              playerRef.current.seekTo(startTime);
+            }
+            loopPauseRef.current = false;
+          }, (dictationLoopGap || 0.5) * 1000);
+        }
       }
     }
   };

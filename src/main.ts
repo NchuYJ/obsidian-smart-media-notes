@@ -488,6 +488,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
             leaf.setEphemeralState({
               ...leaf.view.currentEphemeralState,
               dictationMode: this.dictationMode,
+              dictationLoopCount: parseFloat(this.settings.dictationLoopCount) || 0,
+              dictationLoopGap: parseFloat(this.settings.dictationLoopGap) || 0.5,
             });
           }
         });
@@ -521,6 +523,34 @@ export default class SmartMediaNotesPlugin extends Plugin {
         editor.replaceSelection(result);
         if (diff.allCorrect) {
           new Notice("Perfect! All words correct.");
+        }
+      },
+    });
+
+    this.addCommand({
+      id: "dictation-prev-segment",
+      name: "Dictation: Previous segment",
+      callback: () => {
+        if (!this.dictationMode || !this.player) return;
+        const subs = this.settings.subtitleLibrary[this.currentUrlKey || ""] || [];
+        if (!subs.length || !this.currentSubtitle) return;
+        const idx = subs.findIndex((c: SubtitleCue) => c.start === this.currentSubtitle!.start);
+        if (idx > 0) {
+          this.player.seekTo(subs[idx - 1].start);
+        }
+      },
+    });
+
+    this.addCommand({
+      id: "dictation-next-segment",
+      name: "Dictation: Next segment",
+      callback: () => {
+        if (!this.dictationMode || !this.player) return;
+        const subs = this.settings.subtitleLibrary[this.currentUrlKey || ""] || [];
+        if (!subs.length || !this.currentSubtitle) return;
+        const idx = subs.findIndex((c: SubtitleCue) => c.start === this.currentSubtitle!.start);
+        if (idx >= 0 && idx < subs.length - 1) {
+          this.player.seekTo(subs[idx + 1].start);
         }
       },
     });
@@ -1223,6 +1253,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           subtitleOverlayFontSize:
             _plugin.settings.subtitleOverlayFontSize || "large",
           dictationMode: _plugin.dictationMode,
+          dictationLoopCount: parseFloat(_plugin.settings.dictationLoopCount) || 0,
+          dictationLoopGap: parseFloat(_plugin.settings.dictationLoopGap) || 0.5,
           playlist: vaultFile
             ? _plugin.buildPlaylist(vaultFile)
             : null,

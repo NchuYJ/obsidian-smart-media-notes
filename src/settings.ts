@@ -16,6 +16,8 @@ export interface SmartMediaNotesSettings {
   showSubtitleOverlay: boolean;
   showSubtitleBrowser: boolean;
   subtitleOverlayFontSize: string; // small / medium / large / xlarge
+  dictationLoopCount: string;     // 听写重复次数: "0"=无限, 或 1/2/3/5
+  dictationLoopGap: string;       // 重复间隔(秒): "0.5" / "1" / "1.5" / "2"
   includeSubtitleWithTimestamp: boolean;
   timestampWithSubtitleTemplate: string;
   subtitleStorageFolder: string;
@@ -40,6 +42,8 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   showSubtitleOverlay: true,
   showSubtitleBrowser: true,
   subtitleOverlayFontSize: "large",
+  dictationLoopCount: "0",
+  dictationLoopGap: "0.5",
   includeSubtitleWithTimestamp: false,
   timestampWithSubtitleTemplate: "> {time} {text}\n",
   subtitleStorageFolder: "Subtitles",
@@ -76,6 +80,22 @@ const FONT_SIZES: Record<string, string> = {
   medium: "Medium (15px)",
   large: "Large (18px)",
   xlarge: "Extra Large (22px)",
+};
+
+const LOOP_COUNTS: Record<string, string> = {
+  "0": "Infinite",
+  "1": "1 time",
+  "2": "2 times",
+  "3": "3 times",
+  "5": "5 times",
+};
+
+const LOOP_GAPS: Record<string, string> = {
+  "0": "No gap",
+  "0.5": "0.5 sec",
+  "1": "1 sec",
+  "1.5": "1.5 sec",
+  "2": "2 sec",
 };
 
 export class TimestampPluginSettingTab extends PluginSettingTab {
@@ -271,6 +291,32 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.subtitleOverlayFontSize || "large")
           .onChange(async (value) => {
             this.plugin.settings.subtitleOverlayFontSize = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Dictation loop count")
+      .setDesc("How many times to repeat each subtitle segment. 'Infinite' loops until you move to another sentence.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(LOOP_COUNTS)
+          .setValue(this.plugin.settings.dictationLoopCount || "0")
+          .onChange(async (value) => {
+            this.plugin.settings.dictationLoopCount = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Dictation gap between repeats")
+      .setDesc("Pause between each repeat of a subtitle segment.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(LOOP_GAPS)
+          .setValue(this.plugin.settings.dictationLoopGap || "0.5")
+          .onChange(async (value) => {
+            this.plugin.settings.dictationLoopGap = value;
             await this.plugin.saveSettings();
           }),
       );

@@ -20,6 +20,8 @@ interface EphemeralState {
   showSubtitleBrowser: boolean;
   subtitleOverlayFontSize?: string;
   dictationMode?: boolean;
+  dictationLoopCount?: number;
+  dictationLoopGap?: number;
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: any) => void;
   isAudio?: boolean;
@@ -62,6 +64,8 @@ export class VideoView extends ItemView {
         showSubtitleBrowser: state.showSubtitleBrowser,
         subtitleOverlayFontSize: state.subtitleOverlayFontSize,
         dictationMode: state.dictationMode,
+        dictationLoopCount: state.dictationLoopCount,
+        dictationLoopGap: state.dictationLoopGap,
         playlist: state.playlist,
         onNavigatePlaylist: state.onNavigatePlaylist,
         isAudio: state.isAudio,
