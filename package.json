@@ -1,0 +1,25 @@
+{
+  "name": "obsidian-smart-media-notes",
+  "version": "1.1.0",
+  "description": "Media notes with timestamp, subtitle import, voice recording, and vault media browser.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.js",
+    "build": "node esbuild.config.js production"
+  },
+  "keywords": ["obsidian", "obsidian-plugin", "media", "timestamp", "subtitle"],
+  "author": "Jing",
+  "license": "MIT",
+  "dependencies": {
+    "react": "^18.1.0",
+    "react-dom": "^18.1.0",
+    "react-player": "^2.12.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "esbuild": "^0.17.0",
+    "obsidian": "latest",
+    "typescript": "^5.0.0"
+  }
+}
