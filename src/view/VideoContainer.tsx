@@ -215,7 +215,10 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             >
               {formatSecondsAsTimestamp(cue.start)}
             </span>
-            <span>{cue.text}</span>
+            {/* 听写模式下隐藏文字，仅留时间轴供点击跳转 */}
+            <span style={dictationMode ? { visibility: "hidden" } : undefined}>
+              {cue.text}
+            </span>
           </div>
         );
       })
@@ -357,7 +360,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
       )}
 
       {/* 字幕浏览器 */}
-      {hasSubtitles && showSubtitleBrowser && !dictationMode && (
+      {hasSubtitles && showSubtitleBrowser && (
         <div ref={subtitleListRef} style={subtitleStyle}>
           <div
             style={{
