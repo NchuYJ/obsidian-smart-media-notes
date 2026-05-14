@@ -220,17 +220,18 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
         <div
           style={{
             flex: "0 0 auto",
-            padding: "8px 12px",
+            padding: "12px 14px",
             borderTop: "1px solid var(--background-modifier-border)",
             borderBottom: "1px solid var(--background-modifier-border)",
             backgroundColor: "var(--background-secondary)",
             color: "var(--text-normal)",
-            fontSize: "13px",
-            lineHeight: "1.4",
+            fontSize: "15px",
+            lineHeight: "1.5",
+            fontWeight: 500,
           }}
         >
-          <span style={{ fontWeight: 600, marginRight: "8px", fontSize: "10px",
-            color: "var(--text-muted)", fontFamily: "var(--font-monospace)" }}>
+          <span style={{ fontWeight: 600, marginRight: "10px", fontSize: "12px",
+            color: "var(--text-accent)", fontFamily: "var(--font-monospace)" }}>
             {formatSecondsAsTimestamp(activeSubtitle.start)}
           </span>
           {activeSubtitle.text}
