@@ -143,6 +143,11 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   };
 
   const handleSubtitleClick = (cue: SubtitleCue) => {
+    // 立即更新激活字幕，避免循环逻辑用旧字幕数据
+    setActiveSubtitle(cue);
+    onSubtitleChange(cue);
+    loopCountRef.current = 0;
+    loopPauseRef.current = false;
     if (playerRef.current) playerRef.current.seekTo(cue.start);
   };
 
