@@ -35,6 +35,15 @@ export const MEDIA_EXTENSIONS = [
 export const MEDIA_URL_EXTENSION_RE =
   /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus|webm|mp4|mov|avi|mkv|wmv|flv|ogv|m3u8|mpd)$/i;
 
+/** 音频扩展名列表 — 用于判断文件是否为纯音频 */
+export const AUDIO_EXTENSIONS_RE =
+  /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus)(\?.*)?$/i;
+
+/** 判断 URL/路径是否为音频文件 */
+export function isAudioFile(url: string): boolean {
+  return AUDIO_EXTENSIONS_RE.test(url);
+}
+
 export function formatSecondsAsTimestamp(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Number(totalSeconds || 0));
   const leadingZero = (num: number) =>

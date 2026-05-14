@@ -10,16 +10,7 @@
 
 import React, { useRef, useState, useEffect } from "react";
 import ReactPlayer from "react-player";
-import { SubtitleCue, findCueAtTime, formatSecondsAsTimestamp } from "../utils";
-
-// ---- 音频扩展名列表 ----
-// react-player 对此类 URL 只渲染小控制栏
-const AUDIO_EXTENSIONS_RE = /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus)(\?.*)?$/i;
-
-/** 判断 URL 是否为纯音频 */
-function isAudioUrl(url: string): boolean {
-  return AUDIO_EXTENSIONS_RE.test(url);
-}
+import { SubtitleCue, findCueAtTime, formatSecondsAsTimestamp, isAudioFile } from "../utils";
 
 // ---- 类型 ----
 
@@ -39,6 +30,8 @@ interface VideoContainerProps {
   showSubtitleBrowser?: boolean;
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: any) => void;
+  // 由外部指定是否为音频（本地文件的 blob URL 无法通过扩展名检测）
+  isAudio?: boolean;
 }
 
 // ---- 组件 ----
@@ -54,14 +47,15 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   showSubtitleBrowser,
   playlist,
   onNavigatePlaylist,
+  isAudio: isAudioProp,
 }) => {
   const playerRef = useRef<any>();
   const subtitleListRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
 
-  // 音频模式：播放器不占 flex 空间
-  const audio = isAudioUrl(url);
+  // 音频模式：优先用外部传入的 isAudio（本地文件 blob URL 无法通过扩展名检测）
+  const audio = isAudioProp ?? isAudioFile(url);
 
   // ---- 副作用 ----
 

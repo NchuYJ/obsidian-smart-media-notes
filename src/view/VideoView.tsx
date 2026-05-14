@@ -20,6 +20,7 @@ interface EphemeralState {
   showSubtitleBrowser: boolean;
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: any) => void;
+  isAudio?: boolean;
 }
 
 export class VideoView extends ItemView {
@@ -59,6 +60,7 @@ export class VideoView extends ItemView {
         showSubtitleBrowser: state.showSubtitleBrowser,
         playlist: state.playlist,
         onNavigatePlaylist: state.onNavigatePlaylist,
+        isAudio: state.isAudio,
       }),
     );
   }

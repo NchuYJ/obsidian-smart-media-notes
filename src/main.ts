@@ -31,6 +31,7 @@ import {
   normalizeMediaCandidate,
   isPlayableMedia,
   MEDIA_EXTENSIONS,
+  isAudioFile,
   SubtitleCue,
   ResolvedMedia,
 } from "./utils";
@@ -1113,6 +1114,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
     for (const leaf of leaves) {
       if (leaf.view instanceof VideoView) {
         const subs = await _plugin.getSubtitlesForUrl(url, vaultFile);
+        // 检测音频：使用原始 URL（本地文件 blob URL 无法通过扩展名检测）
+        const audio = isAudioFile(url) ||
+          (systemPath ? isAudioFile(systemPath) : false) ||
+          (vaultFile?.extension
+            ? !["mp4","mov","avi","mkv","webm","flv","ogv","wmv"].includes(vaultFile.extension.toLowerCase())
+            : false);
         leaf.setEphemeralState({
           url: resolvedUrl,
           setupPlayer: (player: any, setPlaying: (p: boolean) => void) => {
@@ -1151,6 +1158,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
             const newUrl = _plugin.app.vault.getResourcePath(file);
             await _plugin.activateView(newUrl, _plugin.editor, file);
           },
+          isAudio: audio,
         });
         await _plugin.saveSettings();
       }
