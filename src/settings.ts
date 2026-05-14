@@ -12,7 +12,6 @@ export interface SmartMediaNotesSettings {
   backwardsSeek: string;
   recordingsFolder: string;
   subtitleTemplate: string;
-  enableLiveTranscription: boolean;
   showSubtitleOverlay: boolean;
   showSubtitleBrowser: boolean;
   subtitleOverlayFontSize: string; // small / medium / large / xlarge
@@ -38,7 +37,6 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   backwardsSeek: "10",
   recordingsFolder: "Attachments/voice-notes",
   subtitleTemplate: "> [!quote] {time}\n> {text}\n",
-  enableLiveTranscription: true,
   showSubtitleOverlay: true,
   showSubtitleBrowser: true,
   subtitleOverlayFontSize: "large",
@@ -236,20 +234,6 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.subtitleTemplate =
               value || DEFAULT_SETTINGS.subtitleTemplate!;
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Live transcription")
-      .setDesc(
-        "When supported by the embedded browser engine, record voice notes with realtime speech recognition.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableLiveTranscription)
-          .onChange(async (value) => {
-            this.plugin.settings.enableLiveTranscription = value;
             await this.plugin.saveSettings();
           }),
       );

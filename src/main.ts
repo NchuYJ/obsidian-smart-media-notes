@@ -59,8 +59,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
   editor: Editor | null = null;
   mediaRecorder: MediaRecorder | null = null;
   recordedChunks: Blob[] = [];
-  liveTranscript: string = "";
-  speechRecognition: any = null;
 
   // 听写模式
   dictationMode: boolean = false;
@@ -566,9 +564,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.currentUrl = null;
     this.currentUrlKey = null;
     this.currentSubtitle = null;
-    if (this.speechRecognition?.stop) {
-      this.speechRecognition.stop();
-    }
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
     }
@@ -1086,28 +1081,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return leaf;
   }
 
-  // ---- Voice recording ----
-  startSpeechRecognition(): void {
-    if (!this.settings.enableLiveTranscription) return;
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return;
-    this.liveTranscript = "";
-    this.speechRecognition = new SpeechRecognition();
-    this.speechRecognition.continuous = true;
-    this.speechRecognition.interimResults = true;
-    this.speechRecognition.lang = "zh-CN";
-    this.speechRecognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((result: any) => (result[0] ? result[0].transcript : ""))
-        .join(" ")
-        .trim();
-      this.liveTranscript = transcript;
-    };
-    this.speechRecognition.start();
-  }
-
   async startVoiceRecording(): Promise<void> {
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       new Notice("Voice recording is already running.");
@@ -1134,7 +1107,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.mediaRecorder.onstop = () => {
       stream.getTracks().forEach((track) => track.stop());
     };
-    this.startSpeechRecognition();
     this.mediaRecorder.start();
     new Notice("Voice recording started.");
   }
@@ -1152,18 +1124,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
       recorder.addEventListener("stop", () => resolve(), { once: true });
       recorder.stop();
     });
-    if (this.speechRecognition?.stop) {
-      this.speechRecognition.stop();
-      this.speechRecognition = null;
-    }
     const mimeType = recorder.mimeType || "audio/webm";
     const blob = new Blob(this.recordedChunks, { type: mimeType });
-    const transcript = this.liveTranscript
-      ? this.liveTranscript.trim()
-      : "";
     this.mediaRecorder = null;
     this.recordedChunks = [];
-    this.liveTranscript = "";
 
     const folder = await this.ensureFolder(
       this.settings.recordingsFolder,
@@ -1174,11 +1138,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
     const arrayBuffer = await blob.arrayBuffer();
     await this.app.vault.createBinary(path, arrayBuffer);
 
-    const transcriptBlock = transcript
-      ? `\n> ${transcript}\n`
-      : "";
     editor.replaceSelection(
-      `\`\`\`voice-bar\n${path}\n\`\`\`\n${transcriptBlock}`,
+      `\`\`\`voice-bar\n${path}\n\`\`\`\n`,
     );
     new Notice(`Voice recording saved to ${path}.`);
   }
