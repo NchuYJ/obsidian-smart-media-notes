@@ -189,29 +189,53 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           }
         />
 
-        {/* 字幕叠加层 — 仅视频模式 */}
-        {!audio && activeSubtitle && showSubtitleOverlay && (
-          <div
-            style={{
-              position: "absolute",
-              left: "16px",
-              right: "16px",
-              bottom: "18px",
-              padding: "10px 14px",
-              borderRadius: "12px",
-              background: "rgba(0, 0, 0, 0.72)",
-              color: "white",
-              fontSize: "15px",
-              lineHeight: "1.45",
-              textAlign: "center",
-              pointerEvents: "none",
-              backdropFilter: "blur(6px)",
-            }}
-          >
-            {activeSubtitle.text}
-          </div>
+        {/* 字幕叠加层 — 视频：绝对定位浮于底部；音频：内联 banner 不遮盖控制栏 */}
+        {activeSubtitle && showSubtitleOverlay && (
+          !audio ? (
+            <div
+              style={{
+                position: "absolute",
+                left: "16px",
+                right: "16px",
+                bottom: "18px",
+                padding: "10px 14px",
+                borderRadius: "12px",
+                background: "rgba(0, 0, 0, 0.72)",
+                color: "white",
+                fontSize: "15px",
+                lineHeight: "1.45",
+                textAlign: "center",
+                pointerEvents: "none",
+                backdropFilter: "blur(6px)",
+              }}
+            >
+              {activeSubtitle.text}
+            </div>
+          ) : null
         )}
       </div>
+
+      {/* 音频字幕 banner — 播放器与字幕列表之间，不遮盖控制栏 */}
+      {audio && activeSubtitle && showSubtitleOverlay && (
+        <div
+          style={{
+            flex: "0 0 auto",
+            padding: "8px 12px",
+            borderTop: "1px solid var(--background-modifier-border)",
+            borderBottom: "1px solid var(--background-modifier-border)",
+            backgroundColor: "var(--background-secondary)",
+            color: "var(--text-normal)",
+            fontSize: "13px",
+            lineHeight: "1.4",
+          }}
+        >
+          <span style={{ fontWeight: 600, marginRight: "8px", fontSize: "10px",
+            color: "var(--text-muted)", fontFamily: "var(--font-monospace)" }}>
+            {formatSecondsAsTimestamp(activeSubtitle.start)}
+          </span>
+          {activeSubtitle.text}
+        </div>
+      )}
 
       {/* 播放列表导航 */}
       {playlist && (
