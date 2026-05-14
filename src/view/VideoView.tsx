@@ -18,6 +18,7 @@ interface EphemeralState {
   onSubtitleChange: (cue: SubtitleCue | null) => void;
   showSubtitleOverlay: boolean;
   showSubtitleBrowser: boolean;
+  subtitleOverlayFontSize?: string;
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: any) => void;
   isAudio?: boolean;
@@ -58,6 +59,7 @@ export class VideoView extends ItemView {
         onSubtitleChange: state.onSubtitleChange,
         showSubtitleOverlay: state.showSubtitleOverlay,
         showSubtitleBrowser: state.showSubtitleBrowser,
+        subtitleOverlayFontSize: state.subtitleOverlayFontSize,
         playlist: state.playlist,
         onNavigatePlaylist: state.onNavigatePlaylist,
         isAudio: state.isAudio,

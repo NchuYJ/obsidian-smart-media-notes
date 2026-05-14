@@ -15,6 +15,7 @@ export interface SmartMediaNotesSettings {
   enableLiveTranscription: boolean;
   showSubtitleOverlay: boolean;
   showSubtitleBrowser: boolean;
+  subtitleOverlayFontSize: string; // small / medium / large / xlarge
   includeSubtitleWithTimestamp: boolean;
   timestampWithSubtitleTemplate: string;
   subtitleStorageFolder: string;
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   enableLiveTranscription: true,
   showSubtitleOverlay: true,
   showSubtitleBrowser: true,
+  subtitleOverlayFontSize: "large",
   includeSubtitleWithTimestamp: false,
   timestampWithSubtitleTemplate: "> {time} {text}\n",
   subtitleStorageFolder: "Subtitles",
@@ -67,6 +69,13 @@ const TIMES: Record<string, string> = {
   "55": "55", "60": "60", "65": "65", "70": "70", "75": "75",
   "80": "80", "85": "85", "90": "90", "95": "95", "100": "100",
   "105": "105", "110": "110", "115": "115", "120": "120",
+};
+
+const FONT_SIZES: Record<string, string> = {
+  small: "Small (13px)",
+  medium: "Medium (15px)",
+  large: "Large (18px)",
+  xlarge: "Extra Large (22px)",
 };
 
 export class TimestampPluginSettingTab extends PluginSettingTab {
@@ -249,6 +258,19 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.showSubtitleBrowser)
           .onChange(async (value) => {
             this.plugin.settings.showSubtitleBrowser = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Subtitle overlay font size")
+      .setDesc("Controls text size for both video subtitle overlay and audio subtitle banner.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(FONT_SIZES)
+          .setValue(this.plugin.settings.subtitleOverlayFontSize || "large")
+          .onChange(async (value) => {
+            this.plugin.settings.subtitleOverlayFontSize = value;
             await this.plugin.saveSettings();
           }),
       );

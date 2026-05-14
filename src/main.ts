@@ -1151,6 +1151,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
             _plugin.settings.showSubtitleOverlay !== false,
           showSubtitleBrowser:
             _plugin.settings.showSubtitleBrowser !== false,
+          subtitleOverlayFontSize:
+            _plugin.settings.subtitleOverlayFontSize || "large",
           playlist: vaultFile
             ? _plugin.buildPlaylist(vaultFile)
             : null,

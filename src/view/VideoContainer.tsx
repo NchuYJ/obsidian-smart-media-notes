@@ -28,6 +28,7 @@ interface VideoContainerProps {
   onSubtitleChange: (cue: SubtitleCue | null) => void;
   showSubtitleOverlay?: boolean;
   showSubtitleBrowser?: boolean;
+  subtitleOverlayFontSize?: string; // small / medium / large / xlarge
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: any) => void;
   // 由外部指定是否为音频（本地文件的 blob URL 无法通过扩展名检测）
@@ -48,6 +49,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   playlist,
   onNavigatePlaylist,
   isAudio: isAudioProp,
+  subtitleOverlayFontSize = "large",
 }) => {
   const playerRef = useRef<any>();
   const subtitleListRef = useRef<HTMLDivElement>(null);
@@ -56,6 +58,15 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   // 音频模式：优先用外部传入的 isAudio（本地文件 blob URL 无法通过扩展名检测）
   const audio = isAudioProp ?? isAudioFile(url);
+
+  // 根据设置计算字体大小
+  const sizeMap: Record<string, { text: string; ts: string }> = {
+    small: { text: "13px", ts: "10px" },
+    medium: { text: "15px", ts: "12px" },
+    large: { text: "18px", ts: "14px" },
+    xlarge: { text: "22px", ts: "16px" },
+  };
+  const fs = sizeMap[subtitleOverlayFontSize] || sizeMap.large;
 
   // ---- 副作用 ----
 
@@ -202,7 +213,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
                 borderRadius: "12px",
                 background: "rgba(0, 0, 0, 0.72)",
                 color: "white",
-                fontSize: "15px",
+                fontSize: fs.text,
                 lineHeight: "1.45",
                 textAlign: "center",
                 pointerEvents: "none",
@@ -225,12 +236,12 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             borderBottom: "1px solid var(--background-modifier-border)",
             background: "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)",
             color: "var(--text-normal)",
-            fontSize: "18px",
+            fontSize: fs.text,
             lineHeight: "1.6",
             fontWeight: 500,
           }}
         >
-          <span style={{ fontWeight: 700, marginRight: "12px", fontSize: "14px",
+          <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
             color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
             background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px" }}>
             {formatSecondsAsTimestamp(activeSubtitle.start)}
