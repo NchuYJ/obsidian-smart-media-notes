@@ -214,6 +214,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             fontSize: fs.text,
             lineHeight: "1.6",
             fontWeight: 500,
+            minHeight: "4.5em",
             maxHeight: "4.5em",
             overflow: "hidden",
             display: "flex",
