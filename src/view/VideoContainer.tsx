@@ -1,6 +1,27 @@
+/**
+ * VideoContainer.tsx — React 媒体播放器组件
+ *
+ * 支持视频和音频两种模式：
+ *   - 视频：播放器撑满可用高度，字幕叠加层浮于底部
+ *   - 音频：播放器自适应内容高度（compact 控制栏），剩余空间留给字幕/播放列表
+ *
+ * 音频检测：通过 URL 扩展名判断（.mp3/.m4a/.ogg 等）
+ */
+
 import React, { useRef, useState, useEffect } from "react";
 import ReactPlayer from "react-player";
 import { SubtitleCue, findCueAtTime, formatSecondsAsTimestamp } from "../utils";
+
+// ---- 音频扩展名列表 ----
+// react-player 对此类 URL 只渲染小控制栏
+const AUDIO_EXTENSIONS_RE = /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus)(\?.*)?$/i;
+
+/** 判断 URL 是否为纯音频 */
+function isAudioUrl(url: string): boolean {
+  return AUDIO_EXTENSIONS_RE.test(url);
+}
+
+// ---- 类型 ----
 
 export interface PlaylistInfo {
   files: any[];
@@ -20,6 +41,8 @@ interface VideoContainerProps {
   onNavigatePlaylist?: (file: any) => void;
 }
 
+// ---- 组件 ----
+
 const VideoContainer: React.FC<VideoContainerProps> = ({
   url,
   setupPlayer,
@@ -35,6 +58,12 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   const playerRef = useRef<any>();
   const subtitleListRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
+
+  // 音频模式：播放器不占 flex 空间
+  const audio = isAudioUrl(url);
+
+  // ---- 副作用 ----
 
   useEffect(() => {
     setPlaying(false);
@@ -42,14 +71,14 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
     return () => clearTimeout(timer);
   }, [url]);
 
-  const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
-
   useEffect(() => {
     if (activeSubtitle && subtitleListRef.current) {
       const el = subtitleListRef.current.querySelector('[data-active="true"]');
       if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }, [activeSubtitle]);
+
+  // ---- 事件处理 ----
 
   const onReady = () => {
     if (start) playerRef.current.seekTo(start);
@@ -70,6 +99,36 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   const hasSubtitles = subtitles && subtitles.length > 0;
 
+  // ---- 渲染 ----
+
+  // 播放器的尺寸策略：
+  //   视频：width/height 100%，flex:1 撑满
+  //   音频：width 100%，height 固定 54px（react-player 音频控制栏高度）
+  const playerStyle: React.CSSProperties = audio
+    ? { width: "100%", height: "54px" }
+    : { width: "100%", height: "100%" };
+
+  // 播放器容器：视频撑满，音频只占内容高度
+  const playerWrapperStyle: React.CSSProperties = audio
+    ? { position: "relative", flex: "0 0 auto" }
+    : { position: "relative", flex: "1 1 auto", minHeight: 0 };
+
+  // 字幕：音频模式下自动占剩余空间
+  const subtitleStyle: React.CSSProperties = audio
+    ? {
+        flex: "1 1 auto",
+        overflowY: "auto",
+        borderTop: "1px solid var(--background-modifier-border)",
+        backgroundColor: "var(--background-primary)",
+      }
+    : {
+        flex: "0 0 auto",
+        maxHeight: "38%",
+        overflowY: "auto",
+        borderTop: "1px solid var(--background-modifier-border)",
+        backgroundColor: "var(--background-primary)",
+      };
+
   const subtitleItems = hasSubtitles
     ? subtitles!.map((cue, idx) => {
         const isActive = activeSubtitle && activeSubtitle.start === cue.start;
@@ -82,24 +141,17 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
               padding: "5px 10px",
               cursor: "pointer",
               borderBottom: "1px solid var(--background-modifier-border)",
-              backgroundColor: isActive
-                ? "var(--interactive-accent)"
-                : "transparent",
-              color: isActive
-                ? "var(--text-on-accent)"
-                : "var(--text-normal)",
+              backgroundColor: isActive ? "var(--interactive-accent)" : "transparent",
+              color: isActive ? "var(--text-on-accent)" : "var(--text-normal)",
               fontSize: "12px",
               lineHeight: "1.4",
               transition: "background-color 0.15s",
             }}
             onMouseEnter={(e) => {
-              if (!isActive)
-                e.currentTarget.style.backgroundColor =
-                  "var(--background-modifier-hover)";
+              if (!isActive) e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
             }}
             onMouseLeave={(e) => {
-              if (!isActive)
-                e.currentTarget.style.backgroundColor = "transparent";
+              if (!isActive) e.currentTarget.style.backgroundColor = "transparent";
             }}
           >
             <span
@@ -121,41 +173,30 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
     : null;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        width: "100%",
-        height: "100%",
-      }}
-    >
-      <div
-        style={{
-          position: "relative",
-          flex: "1 1 auto",
-          minHeight: 0,
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
+      {/* 播放器容器 */}
+      <div style={playerWrapperStyle}>
         <ReactPlayer
           key={url}
           ref={playerRef}
           url={url}
           playing={playing}
           controls={true}
-          width="100%"
-          height="100%"
+          width={playerStyle.width}
+          height={playerStyle.height}
           onReady={onReady}
           onProgress={handleProgress}
           progressInterval={200}
           onError={(err: any) =>
             setupError(
-              err
-                ? err.message
-                : "Video is unplayable due to privacy settings, streaming permissions, etc.",
+              err?.message ||
+                "Video is unplayable due to privacy settings, streaming permissions, etc.",
             )
           }
         />
-        {activeSubtitle && showSubtitleOverlay ? (
+
+        {/* 字幕叠加层 — 仅视频模式 */}
+        {!audio && activeSubtitle && showSubtitleOverlay && (
           <div
             style={{
               position: "absolute",
@@ -175,10 +216,11 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           >
             {activeSubtitle.text}
           </div>
-        ) : null}
+        )}
       </div>
 
-      {playlist ? (
+      {/* 播放列表导航 */}
+      {playlist && (
         <div
           style={{
             flex: "0 0 auto",
@@ -211,31 +253,19 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           >
             ◀
           </button>
-          <span
-            style={{
-              color: "var(--text-muted)",
-              minWidth: "40px",
-              textAlign: "center",
-            }}
-          >
+          <span style={{ color: "var(--text-muted)", minWidth: "40px", textAlign: "center" }}>
             {playlist.currentIndex + 1} / {playlist.files.length}
           </span>
           <button
             onClick={() => {
               if (playlist.currentIndex < playlist.files.length - 1)
-                onNavigatePlaylist?.(
-                  playlist.files[playlist.currentIndex + 1],
-                );
+                onNavigatePlaylist?.(playlist.files[playlist.currentIndex + 1]);
             }}
             disabled={playlist.currentIndex >= playlist.files.length - 1}
             style={{
               padding: "1px 8px",
-              cursor:
-                playlist.currentIndex < playlist.files.length - 1
-                  ? "pointer"
-                  : "default",
-              opacity:
-                playlist.currentIndex < playlist.files.length - 1 ? 1 : 0.3,
+              cursor: playlist.currentIndex < playlist.files.length - 1 ? "pointer" : "default",
+              opacity: playlist.currentIndex < playlist.files.length - 1 ? 1 : 0.3,
               border: "1px solid var(--background-modifier-border)",
               borderRadius: "4px",
               background: "var(--background-primary)",
@@ -246,19 +276,11 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             ▶
           </button>
         </div>
-      ) : null}
+      )}
 
-      {hasSubtitles && showSubtitleBrowser ? (
-        <div
-          ref={subtitleListRef}
-          style={{
-            flex: "0 0 auto",
-            maxHeight: "38%",
-            overflowY: "auto",
-            borderTop: "1px solid var(--background-modifier-border)",
-            backgroundColor: "var(--background-primary)",
-          }}
-        >
+      {/* 字幕浏览器 */}
+      {hasSubtitles && showSubtitleBrowser && (
+        <div ref={subtitleListRef} style={subtitleStyle}>
           <div
             style={{
               padding: "5px 10px",
@@ -278,7 +300,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           </div>
           {subtitleItems}
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

@@ -567,13 +567,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
     // Fallback: try the raw url (backward compat)
     const legacyCached = this.settings.subtitleLibrary[url];
     if (legacyCached && legacyCached.length) {
-      // Migrate to stable key
+      // Migrate to stable key (memory only, subtitleLibrary 不持久化)
       this.settings.subtitleLibrary[stableKey] = legacyCached;
-      await this.saveSettings();
       return legacyCached;
     }
 
-    // Try subtitleFileMap with both keys
+    // Try subtitleFileMap with both keys — 从 vault 文件加载
     let mappedPath = this.settings.subtitleFileMap[stableKey]
       || this.settings.subtitleFileMap[url];
     if (mappedPath) {
@@ -582,8 +581,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const content = await this.app.vault.adapter.read(mappedPath);
           const cues = parseSubtitleFile(content, mappedPath);
           if (cues.length) {
+            // 缓存在内存中，不写 data.json
             this.settings.subtitleLibrary[stableKey] = cues;
-            await this.saveSettings();
             return cues;
           }
         }
@@ -1158,110 +1157,38 @@ export default class SmartMediaNotesPlugin extends Plugin {
     }
   }
 
-  // ---- Data migration (deduplicate blob URL subtitle entries) ----
-  private migrateSubtitleLibrary(
-    library: Record<string, any[]>,
-    fileMap: Record<string, string>,
-  ): Record<string, any[]> {
-    const result: Record<string, any[]> = {};
-    const seenHashes = new Set<string>();
-
-    // First pass: keep entries with non-blob keys (web URLs, stable keys)
-    for (const [key, cues] of Object.entries(library)) {
-      if (!cues || !cues.length) continue;
-
-      // Already a stable key (vault:// or https://)
-      if (key.startsWith("vault://") || key.startsWith("https://")) {
-        result[key] = cues;
-        const hash = `${cues.length}:${cues[0]?.text?.slice(0, 40) || ""}`;
-        seenHashes.add(hash);
-        continue;
-      }
-
-      // Blob/app URLs — these are session-specific duplicates
-      // Hash by cue count + first cue text to detect duplicates
-      const hash = `${cues.length}:${cues[0]?.text?.slice(0, 40) || ""}`;
-      if (seenHashes.has(hash)) {
-        // Duplicate detected — skip
-        continue;
-      }
-      seenHashes.add(hash);
-
-      // Try to find a corresponding subtitle file for a better key
-      const mappedPath = fileMap[key];
-      if (mappedPath) {
-        // Use the file path as a stable key
-        const fileKey = "file://" + mappedPath.replace(/\.(srt|vtt)$/i, "");
-        result[fileKey] = cues;
-      } else {
-        // Keep under original key but this is the only copy
-        result[key] = cues;
-      }
-    }
-
-    return result;
-  }
-
-  private migrateSubtitleFileMap(
-    fileMap: Record<string, string>,
-  ): Record<string, string> {
-    const result: Record<string, string> = {};
-    const seenPaths = new Set<string>();
-
-    for (const [key, path] of Object.entries(fileMap)) {
-      if (seenPaths.has(path)) continue; // duplicate path
-      seenPaths.add(path);
-
-      if (key.startsWith("vault://") || key.startsWith("https://")) {
-        result[key] = path;
-      } else if (key.startsWith("blob:") || key.startsWith("app://")) {
-        // Use the file path to derive a stable key
-        const fileKey = "file://" + path.replace(/\.(srt|vtt)$/i, "");
-        result[fileKey] = path;
-      } else {
-        result[key] = path;
-      }
-    }
-
-    return result;
-  }
-
   // ---- Settings persistence ----
+  //
+  // subtitleLibrary 只做运行时内存缓存，不写入 data.json。
+  // 字幕数据存储在 vault 的 .srt/.vtt 文件中，通过 subtitleFileMap 映射。
+  // 每次启动时 subtitleLibrary 从空开始，访问字幕时按需从磁盘文件加载。
+
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
     if (data) {
+      // 如果 data.json 里残留了旧版 subtitleLibrary，清理掉
+      if (data.subtitleLibrary && Object.keys(data.subtitleLibrary).length > 0) {
+        data.subtitleLibrary = {};
+        // 立即保存清理后的数据
+        await this.saveData({ ...data, subtitleLibrary: {} });
+      }
+
       const map = new Map<string, number>(
         Object.keys(data.urlStartTimeMap || {}).map((k) => [
           k,
           data.urlStartTimeMap[k],
         ]),
       );
-      // Migrate old blob URL keys in subtitleLibrary to deduplicated stable keys
-      const migratedLibrary = this.migrateSubtitleLibrary(
-        data.subtitleLibrary || {},
-        data.subtitleFileMap || {},
-      );
-      const migratedFileMap = this.migrateSubtitleFileMap(
-        data.subtitleFileMap || {},
-      );
       this.settings = {
         ...(DEFAULT_SETTINGS as SmartMediaNotesSettings),
         ...data,
         urlStartTimeMap: map,
-        subtitleLibrary: migratedLibrary,
-        subtitleFileMap: migratedFileMap,
+        // 强制字幕缓存为空 — 从磁盘文件按需加载
+        subtitleLibrary: {},
+        subtitleFileMap: data.subtitleFileMap || {},
         rssSubscriptions: data.rssSubscriptions || [],
         mediaFolders: data.mediaFolders || [],
       };
-      // Save immediately if migration changed anything
-      if (
-        Object.keys(migratedLibrary).length !==
-          Object.keys(data.subtitleLibrary || {}).length ||
-        Object.keys(migratedFileMap).length !==
-          Object.keys(data.subtitleFileMap || {}).length
-      ) {
-        await this.saveSettings();
-      }
     } else {
       this.settings = Object.assign(
         {},
@@ -1272,8 +1199,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
+    // 不持久化 subtitleLibrary — 它只是运行时缓存
+    const { subtitleLibrary, ...toSave } = this.settings;
     await this.saveData({
-      ...this.settings,
+      ...toSave,
       urlStartTimeMap: Object.fromEntries(this.settings.urlStartTimeMap),
     });
   }
