@@ -507,17 +507,54 @@ export default class SmartMediaNotesPlugin extends Plugin {
   }
 
   // ---- Subtitle management ----
-  async getSubtitlesForUrl(url: string): Promise<SubtitleCue[]> {
-    const cached = this.settings.subtitleLibrary[url];
+
+  /** Generate a stable key for subtitle storage that won't change between sessions */
+  getStableSubtitleKey(url: string, vaultFile?: any): string {
+    // For vault files, use the vault path (stable across sessions)
+    if (vaultFile?.path) {
+      return "vault://" + vaultFile.path;
+    }
+    // For system files, the __system__: prefix is already stable
+    if (url.startsWith("__system__:")) {
+      return url;
+    }
+    // For blob URLs, we can't get a stable key without vaultFile — try to extract
+    // a meaningful segment or fall back to the URL itself
+    if (url.startsWith("blob:") || url.startsWith("app://")) {
+      // These are session-specific; use as-is but they won't be stable
+      // In practice, vaultFile should always be provided when calling from activateView
+      return url;
+    }
+    // Web URLs are stable
+    return url;
+  }
+
+  async getSubtitlesForUrl(url: string, vaultFile?: any): Promise<SubtitleCue[]> {
+    const stableKey = this.getStableSubtitleKey(url, vaultFile);
+
+    // Try lookup by stable key first
+    const cached = this.settings.subtitleLibrary[stableKey];
     if (cached && cached.length) return cached;
-    const mappedPath = this.settings.subtitleFileMap[url];
+
+    // Fallback: try the raw url (backward compat)
+    const legacyCached = this.settings.subtitleLibrary[url];
+    if (legacyCached && legacyCached.length) {
+      // Migrate to stable key
+      this.settings.subtitleLibrary[stableKey] = legacyCached;
+      await this.saveSettings();
+      return legacyCached;
+    }
+
+    // Try subtitleFileMap with both keys
+    let mappedPath = this.settings.subtitleFileMap[stableKey]
+      || this.settings.subtitleFileMap[url];
     if (mappedPath) {
       try {
         if (await this.app.vault.adapter.exists(mappedPath)) {
           const content = await this.app.vault.adapter.read(mappedPath);
           const cues = parseSubtitleFile(content, mappedPath);
           if (cues.length) {
-            this.settings.subtitleLibrary[url] = cues;
+            this.settings.subtitleLibrary[stableKey] = cues;
             await this.saveSettings();
             return cues;
           }
@@ -602,28 +639,28 @@ export default class SmartMediaNotesPlugin extends Plugin {
       new Notice("No subtitle cues were detected in that file.");
       return;
     }
-    this.settings.subtitleLibrary[url] = cues;
+    const stableKey = this.getStableSubtitleKey(url);
+    this.settings.subtitleLibrary[stableKey] = cues;
     const folder = await this.ensureFolder(this.settings.subtitleStorageFolder);
-    const safeName = urlToSafeName(url);
+    const safeName = urlToSafeName(stableKey);
     const ext = file.name.toLowerCase().endsWith(".vtt") ? ".vtt" : ".srt";
     const subtitlePath = normalizePath(`${folder}/${safeName}${ext}`);
     await this.app.vault.adapter.write(subtitlePath, content);
-    this.settings.subtitleFileMap[url] = subtitlePath;
+    this.settings.subtitleFileMap[stableKey] = subtitlePath;
     await this.saveSettings();
-    if (url === (this.currentUrlKey || this.currentUrl)) {
-      const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
-      leaves.forEach((leaf) => {
-        if (
-          leaf.view instanceof VideoView &&
-          leaf.view.currentEphemeralState
-        ) {
-          leaf.setEphemeralState({
-            ...leaf.view.currentEphemeralState,
-            subtitles: cues,
-          });
-        }
-      });
-    }
+    // Update all open video views with the new subtitles
+    const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
+    leaves.forEach((leaf) => {
+      if (
+        leaf.view instanceof VideoView &&
+        leaf.view.currentEphemeralState
+      ) {
+        leaf.setEphemeralState({
+          ...leaf.view.currentEphemeralState,
+          subtitles: cues,
+        });
+      }
+    });
     new Notice(`Imported ${cues.length} subtitle lines. Saved to ${subtitlePath}`);
   }
 
@@ -1048,7 +1085,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
     for (const leaf of leaves) {
       if (leaf.view instanceof VideoView) {
-        const subs = await _plugin.getSubtitlesForUrl(url);
+        const subs = await _plugin.getSubtitlesForUrl(url, vaultFile);
         leaf.setEphemeralState({
           url: resolvedUrl,
           setupPlayer: (player: any, setPlaying: (p: boolean) => void) => {
@@ -1093,6 +1130,74 @@ export default class SmartMediaNotesPlugin extends Plugin {
     }
   }
 
+  // ---- Data migration (deduplicate blob URL subtitle entries) ----
+  private migrateSubtitleLibrary(
+    library: Record<string, any[]>,
+    fileMap: Record<string, string>,
+  ): Record<string, any[]> {
+    const result: Record<string, any[]> = {};
+    const seenHashes = new Set<string>();
+
+    // First pass: keep entries with non-blob keys (web URLs, stable keys)
+    for (const [key, cues] of Object.entries(library)) {
+      if (!cues || !cues.length) continue;
+
+      // Already a stable key (vault:// or https://)
+      if (key.startsWith("vault://") || key.startsWith("https://")) {
+        result[key] = cues;
+        const hash = `${cues.length}:${cues[0]?.text?.slice(0, 40) || ""}`;
+        seenHashes.add(hash);
+        continue;
+      }
+
+      // Blob/app URLs — these are session-specific duplicates
+      // Hash by cue count + first cue text to detect duplicates
+      const hash = `${cues.length}:${cues[0]?.text?.slice(0, 40) || ""}`;
+      if (seenHashes.has(hash)) {
+        // Duplicate detected — skip
+        continue;
+      }
+      seenHashes.add(hash);
+
+      // Try to find a corresponding subtitle file for a better key
+      const mappedPath = fileMap[key];
+      if (mappedPath) {
+        // Use the file path as a stable key
+        const fileKey = "file://" + mappedPath.replace(/\.(srt|vtt)$/i, "");
+        result[fileKey] = cues;
+      } else {
+        // Keep under original key but this is the only copy
+        result[key] = cues;
+      }
+    }
+
+    return result;
+  }
+
+  private migrateSubtitleFileMap(
+    fileMap: Record<string, string>,
+  ): Record<string, string> {
+    const result: Record<string, string> = {};
+    const seenPaths = new Set<string>();
+
+    for (const [key, path] of Object.entries(fileMap)) {
+      if (seenPaths.has(path)) continue; // duplicate path
+      seenPaths.add(path);
+
+      if (key.startsWith("vault://") || key.startsWith("https://")) {
+        result[key] = path;
+      } else if (key.startsWith("blob:") || key.startsWith("app://")) {
+        // Use the file path to derive a stable key
+        const fileKey = "file://" + path.replace(/\.(srt|vtt)$/i, "");
+        result[fileKey] = path;
+      } else {
+        result[key] = path;
+      }
+    }
+
+    return result;
+  }
+
   // ---- Settings persistence ----
   async loadSettings(): Promise<void> {
     const data = await this.loadData();
@@ -1103,14 +1208,32 @@ export default class SmartMediaNotesPlugin extends Plugin {
           data.urlStartTimeMap[k],
         ]),
       );
+      // Migrate old blob URL keys in subtitleLibrary to deduplicated stable keys
+      const migratedLibrary = this.migrateSubtitleLibrary(
+        data.subtitleLibrary || {},
+        data.subtitleFileMap || {},
+      );
+      const migratedFileMap = this.migrateSubtitleFileMap(
+        data.subtitleFileMap || {},
+      );
       this.settings = {
         ...(DEFAULT_SETTINGS as SmartMediaNotesSettings),
         ...data,
         urlStartTimeMap: map,
-        subtitleLibrary: data.subtitleLibrary || {},
+        subtitleLibrary: migratedLibrary,
+        subtitleFileMap: migratedFileMap,
         rssSubscriptions: data.rssSubscriptions || [],
         mediaFolders: data.mediaFolders || [],
       };
+      // Save immediately if migration changed anything
+      if (
+        Object.keys(migratedLibrary).length !==
+          Object.keys(data.subtitleLibrary || {}).length ||
+        Object.keys(migratedFileMap).length !==
+          Object.keys(data.subtitleFileMap || {}).length
+      ) {
+        await this.saveSettings();
+      }
     } else {
       this.settings = Object.assign(
         {},
