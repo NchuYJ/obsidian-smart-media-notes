@@ -38,6 +38,7 @@ import {
   compareDictation,
   formatDictationResult,
   SubtitleCue,
+  parseTimestampUrlBlock,
   ResolvedMedia,
 } from "./utils";
 
@@ -387,10 +388,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
           this.settings.noteTitle
             ? editor.replaceSelection(
                 "\n" + this.settings.noteTitle +
-                "\n```timestamp-url\n" + selected + "\n```\n",
+                "\n```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + "\n" + selected + "\n```\n",
               )
             : editor.replaceSelection(
-                "```timestamp-url\n" + selected + "\n```\n",
+                "```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + "\n" + selected + "\n```\n",
               );
           this.editor = editor;
           await this.trackTimestamp(selected, {
@@ -1083,7 +1084,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
   ): string {
     const lines: string[] = [];
     if (this.settings.noteTitle) lines.push("", this.settings.noteTitle);
-    lines.push("```timestamp-url", meta.displayPath || url, "```");
+    lines.push("```timestamp-url");
+    if (meta.title) lines.push(meta.title);
+    lines.push(meta.displayPath || url);
+    lines.push("```");
     if (meta.sourceLabel || meta.title) {
       const label = [meta.sourceLabel, meta.title]
         .filter(Boolean)
@@ -1188,8 +1192,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
         while ((match = regex.exec(content)) !== null) {
           const raw = match[1].trim();
           if (!raw) continue;
-          const resolved = this.resolveMediaUrl(raw);
-          const url = resolved ? resolved.playableUrl : (/^https?:\/\//i.test(raw) ? raw : "");
+          const parsedBlock = parseTimestampUrlBlock(raw);
+          const blockUrl = parsedBlock.url;
+          const blockAlias = parsedBlock.alias;
+          const resolved = this.resolveMediaUrl(blockUrl);
+          const url = resolved ? resolved.playableUrl : (/^https?:\/\//i.test(blockUrl) ? blockUrl : "");
           if (!url) continue;
 
           const key = url + "|" + file.path;
@@ -1212,9 +1219,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
           const entry: TimestampEntry = {
             url,
-            displayPath: resolved?.displayPath || raw,
+            displayPath: resolved?.displayPath || blockUrl,
             notePath: file.path,
-            title: resolved?.displayPath?.split("/").pop()?.replace(/\.[^.]+$/, "") || file.basename,
+            title: blockAlias || resolved?.displayPath?.split("/").pop()?.replace(/\.[^.]+$/, "") || file.basename,
             sourceLabel: resolved?.isVaultFile ? "Vault" : "URL",
             tags: existing
               ? [...new Set([...fmTags, ...existing.tags])]

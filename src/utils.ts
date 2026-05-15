@@ -1,4 +1,4 @@
-export interface SubtitleCue {
+﻿export interface SubtitleCue {
   start: number;
   end: number;
   text: string;
@@ -185,6 +185,23 @@ export function isPlayableMedia(url: string): boolean {
 }
 
 // ============================================================
+
+/** Parse a timestamp-url block source into alias and URL.
+ *  Two-line format:  alias\nhttps://...  → { alias, url }
+ *  Single-line:      https://...         → { url }
+ */
+export function parseTimestampUrlBlock(source: string): { alias?: string; url: string } {
+  const lines = source.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length >= 2 && /^https?:\/\//i.test(lines[lines.length - 1])) {
+    return { alias: lines[0], url: lines[lines.length - 1] };
+  }
+  if (lines.length === 1 && /^https?:\/\//i.test(lines[0])) {
+    return { url: lines[0] };
+  }
+  // Fallback: treat entire source as URL (file paths, etc.)
+  return { url: source.trim() };
+}
+
 // 听写模式 — 文本对比
 // ============================================================
 
