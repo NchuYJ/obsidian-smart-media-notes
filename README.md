@@ -1,26 +1,36 @@
 # Smart Media Notes
 
-An [Obsidian](https://obsidian.md) plugin for media-powered note-taking. Open videos and audio, insert timestamps, import subtitles, record voice notes, browse RSS podcasts, and manage vault media — all from inside your notes.
+Smart Media Notes is an [Obsidian](https://obsidian.md) plugin for media-based note taking. It lets you open video and audio inside Obsidian, insert clickable timestamps, import subtitles, record voice notes, browse podcast feeds, and keep a reusable media library next to your notes.
 
-> **Built on** [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [@juliang22](https://github.com/juliang22) — the original timestamp-note plugin for Obsidian. Smart Media Notes extends it with media player, subtitle import, voice recording, RSS browser, vault browser, saved media collection, and dictation mode.
+This project builds on [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [@juliang22](https://github.com/juliang22), and extends it with a full media workflow for study, listening practice, research, and review.
 
-## Features
+## What It Can Do
 
-- 🎬 **Media Player** — Open video/audio from URLs, vault files, or local system paths in a split pane
-- ⏱ **Timestamp Notes** — Insert ```` ```timestamp ```` code blocks that seek the player on click
-- 📝 **Subtitle Import** — Import `.srt` / `.vtt` files and display synced subtitles alongside playback
-- 🎤 **Voice Recording** — Record audio directly into notes with optional live transcription
-- 📻 **RSS Podcast Browser** — Subscribe to podcast feeds and browse episodes in the sidebar
-- 📁 **Vault Media Browser** — Browse and play media files from vault folders or local directories
-- 🎯 **Subtitle Notes** — Insert the current subtitle line into your note for language learning
+- Open media from web URLs, vault files, and local system paths
+- Insert clickable `timestamp` and `timestamp-url` code blocks
+- Import `.srt` and `.vtt` subtitles and keep them synced with playback
+- Show a subtitle overlay and subtitle browser below the player
+- Record voice notes into your vault as inline `voice-bar` blocks
+- Save and reopen frequently used media from a Smart Media Library view
+- Browse podcast RSS feeds and launch episodes directly
+- Browse vault media folders
+- Browse local system media folders on desktop
+- Use dictation mode for language learning and listening drills
 
-## Installation
+## Install
 
-### From GitHub
+### Release Install
 
-1. Download `main.js` and `manifest.json` from the [latest release](../../releases)
-2. Copy them into `{vault}/.obsidian/plugins/smart-media-notes/`
-3. Reload Obsidian and enable the plugin in Settings → Community Plugins
+1. Download `manifest.json`, `main.js`, and `styles.css` from the latest release.
+2. Create this folder in your vault if it does not exist:
+
+```text
+.obsidian/plugins/smart-media-notes
+```
+
+3. Copy the three files into that folder.
+4. Restart Obsidian or reload community plugins.
+5. Enable `Smart Media Notes` in `Settings -> Community plugins`.
 
 ### Manual Build
 
@@ -31,19 +41,33 @@ npm install
 npm run build
 ```
 
-Then copy `main.js` and `manifest.json` to your vault's `.obsidian/plugins/smart-media-notes/` folder.
+Then copy:
 
-## Usage
+- `main.js`
+- `manifest.json`
+- `styles.css`
 
-### Open Media
+into:
 
-1. Select a media URL or vault file path in your note
-2. Use the command **"Open media player"** or the library ribbon icon
-3. The player opens in a split pane
+```text
+{your-vault}/.obsidian/plugins/smart-media-notes/
+```
 
-### Insert Timestamps
+## Quick Start
 
-While media is playing, use **"Insert timestamp"** to drop a clickable timestamp into your note:
+### Open a media link
+
+1. Put a media URL or vault file path in your note.
+2. Select it.
+3. Run the command `Open media player (copy url or path and use hotkey)`.
+
+### Insert a timestamp
+
+While media is playing, run:
+
+`Insert timestamp based on videos current play time`
+
+This inserts:
 
 ````markdown
 ```timestamp
@@ -51,108 +75,155 @@ While media is playing, use **"Insert timestamp"** to drop a clickable timestamp
 ```
 ````
 
-### Import Subtitles
+Clicking the timestamp in reading mode seeks the active player.
 
-1. Open a video/audio in the player
-2. Use **"Import subtitle file"** to load a `.srt` or `.vtt` file
-3. Subtitles appear below the player and stay in sync
+### Bind a media source to a note
 
-### Voice Recording
+You can also insert:
 
-- **"Start voice recording"** — begins recording from your microphone
-- **"Stop voice recording"** — saves the recording as ```` ```voice-bar ```` block with optional transcription
-
-### RSS Feeds
-
-Add RSS podcast URLs in plugin settings (one per line, with optional title):
-
+````markdown
+```timestamp-url
+Lesson 01 | https://example.com/audio.mp3
 ```
-Office Ladies | https://feeds.megaphone.fm/office-ladies
+````
+
+or:
+
+````markdown
+```timestamp-url
+https://example.com/audio.mp3
 ```
+````
 
-Browse episodes in the **Smart Media Library** sidebar panel.
+Clicking the rendered button reopens the media.
 
-### Custom Code Blocks
+## Main Features
 
-The plugin renders three custom code blocks in reading mode:
+### Smart Media Player
 
-| Block | Purpose |
-|---|---|
-| ```` ```timestamp ```` | Clickable time seek button |
-| ```` ```timestamp-url ```` | Clickable media URL button |
-| ```` ```voice-bar ```` | Inline audio player with waveform |
+- Supports video and audio
+- Works with many web URLs through `react-player`
+- Works with Obsidian vault files
+- Supports direct local system file paths
+
+### Subtitle Support
+
+- Import `.srt` or `.vtt`
+- Show current subtitle as an overlay
+- Show subtitles in a scrollable browser
+- Click a subtitle line to jump playback
+- Insert the current subtitle into your note
+
+### Smart Media Library
+
+The library view can show:
+
+- saved media entries from your notes
+- podcast RSS subscriptions
+- vault media folders
+- local system media folders
+
+Saved entries can be filtered by tags and reopened quickly.
+
+### Voice Notes
+
+You can record audio directly into your vault and insert an inline player:
+
+````markdown
+```voice-bar
+Attachments/voice-notes/voice-note-123456.webm
+```
+````
+
+### Dictation Mode
+
+Dictation mode is useful for language learning:
+
+- loop the current subtitle segment
+- move to previous or next segment
+- hide subtitle text while keeping time anchors
+- reveal and compare typed text against the original subtitle
+
+## Commands
+
+Main commands include:
+
+- `Open media player (copy url or path and use hotkey)`
+- `Insert timestamp based on videos current play time`
+- `Pause player`
+- `Seek Forward`
+- `Seek Backward`
+- `Open local media file`
+- `Open media from vault`
+- `Open media library sidebar`
+- `Import subtitle file for current media`
+- `Insert current subtitle with timestamp`
+- `Start voice recording`
+- `Stop voice recording and save note`
+- `Toggle dictation mode`
+- `Reveal dictation answer (compare with selected text)`
+- `Dictation: Previous segment`
+- `Dictation: Next segment`
+- `Reconcile saved media collection`
 
 ## Settings
 
-| Setting | Description |
-|---|---|
-| Title | Template inserted when opening media (`<br>` for newlines) |
-| URL / Timestamp Colors | Button and text colors for code blocks |
-| Seek Interval | Forward/backward jump duration |
-| Voice Recordings Folder | Vault path for saved recordings |
-| Subtitle Template | Format for inserted subtitle notes (`{time}`, `{text}`) |
-| Live Transcription | Enable real-time speech recognition |
-| Subtitle Overlay / Browser | Show subtitles on video or as scrollable list |
-| RSS Subscriptions | Podcast feed URLs |
-| Media Folders | Vault or system paths to browse for media files |
-| Auto Insert Library Note | Insert timestamp-url + source when clicking library items |
+Important settings:
+
+- `Title`
+- `URL Button Color`
+- `Timestamp Button Color`
+- `Forward time seek`
+- `Backwards time seek`
+- `Voice recordings folder`
+- `Subtitle note template`
+- `Subtitle overlay`
+- `Subtitle browser`
+- `Subtitle overlay font size`
+- `Dictation loop count`
+- `Dictation gap between repeats`
+- `Subtitle storage folder`
+- `RSS subscriptions`
+- `Video formats`
+- `Audio formats`
+- `Media folders`
+- `Auto insert library note`
+- `Include subtitle with timestamp`
+- `Timestamp + subtitle template`
+
+## Desktop Notes
+
+The plugin works best on desktop.
+
+System file paths and system folder scanning are primarily intended for desktop workflows. If you only want vault-safe media browsing, use vault media files and vault folders.
+
+## Tutorial
+
+For a more guided walkthrough, see [TUTORIAL.md](./TUTORIAL.md).
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Development build (with sourcemaps)
 npm run dev
-
-# Production build (minified)
 npm run build
 ```
 
-### Project Structure
+Project structure:
 
-```
+```text
 src/
-├── main.ts                  # Plugin entry point, commands, modals
-├── settings.ts              # Settings tab UI + defaults
-├── utils.ts                 # Subtitle parsing, time formatting, URL helpers
-└── view/
-    ├── VideoContainer.tsx   # React media player with subtitle overlay
-    └── VideoView.tsx        # Obsidian ItemView for player + library sidebar
+  main.ts
+  settings.ts
+  utils.ts
+  view/
+    VideoContainer.tsx
+    VideoView.tsx
 ```
-
-### Tech Stack
-
-- **Obsidian API** — Plugin lifecycle, views, commands, settings
-- **React 18** — UI components (`react`, `react-dom/client`)
-- **react-player** — Multi-source media playback
-- **esbuild** — Fast bundler with tree-shaking and minification
-- **TypeScript** — Type-safe development
-
-### Build Optimizations
-
-The production build applies:
-- React production mode (`NODE_ENV=production`)
-- Tree-shaking (unused react-player providers are eliminated)
-- Minification
-- `obsidian` marked as external (provided by the app)
-
-**Bundle size: ~259 KB** (down from 1.35 MB in the unbundled dev build).
 
 ## Acknowledgments
 
-This project is derived from [**ObsidianTimestampNotes**](https://github.com/juliang22/ObsidianTimestampNotes) by [**juliang22**](https://github.com/juliang22) — the original plugin that introduced timestamp code blocks and media timestamp note-taking in Obsidian.
-
-Smart Media Notes extends that foundation with:
-- Full media player (video + audio) embedded in the workspace
-- Subtitle import and synced display
-- Voice recording with inline playback
-- RSS podcast browser
-- Vault and local filesystem media browser
-- Saved media collection with tag filtering
-- Configurable media format support
-- Dictation mode for language learning
+Derived from [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [juliang22](https://github.com/juliang22).
 
 ## License
 
