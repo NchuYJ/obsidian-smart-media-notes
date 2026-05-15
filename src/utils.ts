@@ -190,16 +190,35 @@ export function isPlayableMedia(url: string): boolean {
  *  Two-line format:  alias\nhttps://...  → { alias, url }
  *  Single-line:      https://...         → { url }
  */
+/** Parse a timestamp-url block source into alias and URL.
+ *  Supported formats:
+ *    name | https://...        — single-line pipe (preferred)
+ *    name\nhttps://...         — two-line (legacy)
+ *    https://...               — URL only
+ *    /path/to/file.mp4         — file path
+ */
 export function parseTimestampUrlBlock(source: string): { alias?: string; url: string } {
-  const lines = source.trim().split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length >= 2 && /^https?:\/\//i.test(lines[lines.length - 1])) {
-    return { alias: lines[0], url: lines[lines.length - 1] };
+  const s = source.trim();
+  // Format 1: name | link  (pipe-separated single line)
+  const pipeIdx = s.indexOf("|");
+  if (pipeIdx > 0) {
+    const alias = s.substring(0, pipeIdx).trim();
+    const link = s.substring(pipeIdx + 1).trim();
+    if (link) return { alias: alias || undefined, url: link };
   }
-  if (lines.length === 1 && /^https?:\/\//i.test(lines[0])) {
-    return { url: lines[0] };
+  // Format 2: name\nlink (two-line legacy)
+  const lines = s.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length >= 2) {
+    const last = lines[lines.length - 1];
+    const isUrl = /^https?:\/\//i.test(last);
+    const isPath = /^(\/|[A-Za-z]:\\)/.test(last);  // Unix / Windows path
+    if (isUrl || isPath) {
+      return { alias: lines[0], url: last };
+    }
+    // If last line isn't a URL/path, treat entire source as URL
   }
-  // Fallback: treat entire source as URL (file paths, etc.)
-  return { url: source.trim() };
+  // Format 3: URL / path only
+  return { url: s };
 }
 
 // 听写模式 — 文本对比

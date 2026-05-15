@@ -353,7 +353,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
       name: "Open media player (copy url or path and use hotkey)",
       editorCallback: async (editor: Editor) => {
         const selected = editor.getSelection().trim();
-        const resolved = this.resolveMediaUrl(selected);
+        const parsedSel = parseTimestampUrlBlock(selected);
+        const selectedUrl = parsedSel.url || selected;
+        const selectedAlias = parsedSel.alias;
+        const resolved = this.resolveMediaUrl(selectedUrl);
         if (resolved) {
           this.activateView(
             resolved.playableUrl,
@@ -384,20 +387,20 @@ export default class SmartMediaNotesPlugin extends Plugin {
         } else if (/^https?:\/\//i.test(selected)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
-          this.activateView(selected, editor);
+          this.activateView(selectedUrl, editor);
           this.settings.noteTitle
             ? editor.replaceSelection(
                 "\n" + this.settings.noteTitle +
-                "\n```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + "\n" + selected + "\n```\n",
+                "\n```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + " | " + selected + "\n```\n",
               )
             : editor.replaceSelection(
-                "```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + "\n" + selected + "\n```\n",
+                "```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + " | " + selected + "\n```\n",
               );
           this.editor = editor;
-          await this.trackTimestamp(selected, {
+          await this.trackTimestamp(selectedUrl, {
             displayPath: selected,
             sourceLabel: "URL",
-            title: selected,
+            title: selectedAlias || selectedUrl,
           });
           await this.refreshLibraryView();
         } else {
@@ -1084,9 +1087,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
   ): string {
     const lines: string[] = [];
     if (this.settings.noteTitle) lines.push("", this.settings.noteTitle);
+    const alias = meta.title || meta.displayPath?.split("/").pop()?.replace(/\.[^.]+$/, "") || "";
+    const link = meta.displayPath || url;
     lines.push("```timestamp-url");
-    if (meta.title) lines.push(meta.title);
-    lines.push(meta.displayPath || url);
+    lines.push(alias ? alias + " | " + link : link);
     lines.push("```");
     if (meta.sourceLabel || meta.title) {
       const label = [meta.sourceLabel, meta.title]
