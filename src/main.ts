@@ -483,7 +483,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
       name: "Open local media file",
       editorCallback: (editor: Editor) => {
         this.editor = editor;
-        new SampleModal(this.app, this.activateView.bind(this), editor).open();
+        new LocalFileModal(this.app, this.activateView.bind(this), editor).open();
         return true;
       },
     });
@@ -652,8 +652,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
     }
-    this.app.workspace.detachLeavesOfType(VIDEO_VIEW);
-    this.app.workspace.detachLeavesOfType(LIBRARY_VIEW);
   }
 
   // ---- Dictation mode helpers ----
@@ -1144,16 +1142,16 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   
   // ---- Timestamp collection ----
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async trackTimestamp(url: string, meta: { displayPath?: string; sourceLabel?: string; title?: string; }): Promise<void> {
+  async trackTimestamp(url: string, _meta: { displayPath?: string; sourceLabel?: string; title?: string; }): Promise<void> {
+    const title = _meta.title || _meta.displayPath || urlToSafeName(url);
     const activeFile = this.app.workspace.getActiveFile();
     const notePath = activeFile?.path || "";
     const entry: TimestampEntry = {
       url: url,
-      displayPath: meta.displayPath || url,
+      displayPath: _meta.displayPath || url,
       notePath: notePath,
-      title: meta.title || meta.displayPath || urlToSafeName(url),
-      sourceLabel: meta.sourceLabel || "",
+      title: _meta.title || _meta.displayPath || urlToSafeName(url),
+      sourceLabel: _meta.sourceLabel || "",
       tags: [],
       lastOpened: Date.now(),
     };
@@ -1821,7 +1819,7 @@ class PodcastModal extends Modal {
   }
 }
 
-class SampleModal extends Modal {
+class LocalFileModal extends Modal {
   activateView: (url: string, editor: Editor | null) => void;
   editor: Editor | null;
 
