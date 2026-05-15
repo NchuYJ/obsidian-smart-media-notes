@@ -385,14 +385,43 @@ export class MediaLibraryView extends ItemView {
       row.addEventListener("click", async () => {
         const noteFile = this.app.vault.getAbstractFileByPath(entry.notePath);
         if (noteFile) {
+          // Find the timestamp-url block line to jump directly to it
+          let cursorLine = 0;
+          try {
+            const content = await this.app.vault.read(noteFile);
+            const lines = content.split("\n");
+            let inBlock = false;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].trim() === "```timestamp-url") {
+                inBlock = true;
+                continue;
+              }
+              if (inBlock && lines[i].trim() === "```") {
+                inBlock = false;
+                continue;
+              }
+              if (inBlock) {
+                // Check if this line contains our URL (may be "alias | url" or plain url)
+                const blockLine = lines[i].trim();
+                const parsed = blockLine.includes("|")
+                  ? blockLine.substring(blockLine.indexOf("|") + 1).trim()
+                  : blockLine;
+                if (parsed === entry.url || parsed === entry.displayPath || blockLine.includes(entry.url)) {
+                  cursorLine = i - 1; // jump to the ```timestamp-url header line
+                  break;
+                }
+              }
+            }
+          } catch (_) { /* ignore */ }
           // @ts-ignore
-          this.app.workspace.getLeaf().openFile(noteFile);
+          const leaf = this.app.workspace.getLeaf();
+          await leaf.openFile(noteFile, { eState: { cursor: { line: cursorLine, ch: 0 } } });
         }
         await this.plugin.openLibraryMedia(entry.url, null, {
           title: entry.title,
           sourceLabel: entry.sourceLabel,
           displayPath: entry.displayPath,
-        });
+        }, { skipInsert: true });
       });
     });
   }
