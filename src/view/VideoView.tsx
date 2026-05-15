@@ -341,25 +341,28 @@ export class MediaLibraryView extends ItemView {
         }
       });
 
-      // Sub-info line
+      // Sub-info line — source + note name + date with proper spacing
       const infoLine = row.createEl("div", {
         style: {
           fontSize: "10px",
           color: "var(--text-faint)",
-          marginBottom: "4px",
+          marginBottom: "6px",
           display: "flex",
-          gap: "8px",
+          gap: "10px",
           alignItems: "center",
         },
       });
-      infoLine.createEl("span", {
-        text: entry.sourceLabel || "",
-        style: { opacity: "0.6" },
-      });
+      if (entry.sourceLabel) {
+        infoLine.createEl("span", {
+          text: entry.sourceLabel,
+          style: { opacity: "0.6", flexShrink: "0" },
+        });
+        infoLine.createEl("span", { text: "·", style: { opacity: "0.3" } });
+      }
       if (entry.notePath) {
         const noteLink = infoLine.createEl("span", {
           text: "\uD83D\uDCC4 " + (entry.notePath.split("/").pop()?.replace(/.md$/, "") || ""),
-          style: { cursor: "pointer", color: "var(--text-accent)" },
+          style: { cursor: "pointer", color: "var(--text-accent)", flexShrink: "0" },
         });
         noteLink.addEventListener("click", (e) => {
           e.stopPropagation();
@@ -369,11 +372,12 @@ export class MediaLibraryView extends ItemView {
             this.app.workspace.getLeaf().openFile(file);
           }
         });
+        infoLine.createEl("span", { text: "·", style: { opacity: "0.3", flexShrink: "0" } });
       }
       const d = new Date(entry.lastOpened);
       infoLine.createEl("span", {
         text: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        style: { opacity: "0.6", marginLeft: "auto" },
+        style: { opacity: "0.6", flexShrink: "0" },
       });
 
       // Tags
