@@ -26,8 +26,16 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 - **Tag filter bar**: Saved Media now shows a filter bar at the top with all unique tags. Click a tag to filter by it; click "All" to clear. Active tag is highlighted.
 - **Tag pills click to filter**: Clicking any tag pill on an entry now activates the tag filter for that tag (instead of removing it as before)
 
+### Fixed
+- **flatMap → reduce**: Replaced ES2019 `flatMap` with `reduce(…concat…)` compatible with ES2018 build target — the tag filter bar now correctly collects all tags and filters entries.
+- **Tag filter bar UI**: Pills now use `border` instead of background-only style, better matching the Library section aesthetic. Filter bar only renders when there are tags.
+- **Sections closed by default**: Removed `section.open = true` from all three Library sections — they now start collapsed to prevent layout overflow in busy vaults.
+- **Saved media click no longer re-inserts timestamp**: Added `skipInsert` option to `openLibraryMedia()`. Saved Media entries now open without creating duplicate `\`\`\`timestamp-url` blocks (the note already has one).
+
 ### Changed
 - Saved Media section UI unified with RSS/Folders (`<details>` with count). `_savedMediaFilterTag` state preserved across re-renders.
+- **All library sections now closed by default** (Saved Media, RSS Subscriptions, Media Folders) — prevents layout overflow.
+- **Saved Media entries skip timestamp insertion** — clicking an entry opens the note and player without adding a duplicate `timestamp-url` block (since the note already has one).
 
 ---
 
