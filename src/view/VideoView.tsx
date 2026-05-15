@@ -161,7 +161,7 @@ export class MediaLibraryView extends ItemView {
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " Saved Media",
-      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
+      style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
     });
     summary.createEl("span", {
       text: String(collection.length),
@@ -455,7 +455,7 @@ export class MediaLibraryView extends ItemView {
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " RSS Subscriptions",
-      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
+      style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
     });
     summary.createEl("span", {
       text: String(feeds.length),
@@ -659,7 +659,11 @@ export class MediaLibraryView extends ItemView {
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " Media Folders",
-      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
+      style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
+    });
+    summary.createEl("span", {
+      text: String(folders.length),
+      style: { fontSize: "11px", color: "var(--text-faint)", fontWeight: "400" },
     });
     // Restore open state to avoid collapse on tag filter clicks
     if (this._foldersOpen) section.open = true;
