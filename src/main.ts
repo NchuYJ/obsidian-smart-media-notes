@@ -372,11 +372,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
                 "\n" +
                   this.settings.noteTitle +
                   "\n```timestamp-url\n" +
+                  (selectedAlias ? selectedAlias + " | " : "") +
                   resolved.displayPath +
                   "\n```\n",
               )
             : editor.replaceSelection(
-                "```timestamp-url\n" + resolved.displayPath + "\n```\n",
+                "```timestamp-url\n" +
+                  (selectedAlias ? selectedAlias + " | " : "") +
+                  resolved.displayPath +
+                  "\n```\n",
               );
           this.editor = editor;
           this.trackTimestamp(resolved.playableUrl, {
@@ -388,17 +392,17 @@ export default class SmartMediaNotesPlugin extends Plugin {
         } else if (this.isPodcastUrl(selectedUrl)) {
           this.editor = editor;
           new PodcastModal(this.app, this, selectedUrl, editor).open();
-        } else if (/^https?:\/\//i.test(selected)) {
+        } else if (/^https?:\/\//i.test(selectedUrl)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
           this.activateView(selectedUrl, editor);
           this.settings.noteTitle
             ? editor.replaceSelection(
                 "\n" + this.settings.noteTitle +
-                "\n```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + " | " + selected + "\n```\n",
+                "\n```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
               )
             : editor.replaceSelection(
-                "```timestamp-url\n" + selected.split("/").pop()?.split("?")[0] + " | " + selected + "\n```\n",
+                "```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
               );
           this.editor = editor;
           await this.trackTimestamp(selectedUrl, {
