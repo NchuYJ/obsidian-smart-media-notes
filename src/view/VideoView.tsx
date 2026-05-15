@@ -385,7 +385,7 @@ export class MediaLibraryView extends ItemView {
       row.addEventListener("click", async () => {
         const noteFile = this.app.vault.getAbstractFileByPath(entry.notePath);
         if (noteFile) {
-          // Find the timestamp-url block line to jump directly to it
+          // Find the timestamp-url block line
           let cursorLine = 0;
           try {
             const content = await this.app.vault.read(noteFile);
@@ -401,13 +401,12 @@ export class MediaLibraryView extends ItemView {
                 continue;
               }
               if (inBlock) {
-                // Check if this line contains our URL (may be "alias | url" or plain url)
                 const blockLine = lines[i].trim();
                 const parsed = blockLine.includes("|")
                   ? blockLine.substring(blockLine.indexOf("|") + 1).trim()
                   : blockLine;
                 if (parsed === entry.url || parsed === entry.displayPath || blockLine.includes(entry.url)) {
-                  cursorLine = i - 1; // jump to the ```timestamp-url header line
+                  cursorLine = i - 1; // jump to ```timestamp-url header
                   break;
                 }
               }
@@ -415,7 +414,13 @@ export class MediaLibraryView extends ItemView {
           } catch (_) { /* ignore */ }
           // @ts-ignore
           const leaf = this.app.workspace.getLeaf();
-          await leaf.openFile(noteFile, { eState: { cursor: { line: cursorLine, ch: 0 } } });
+          await leaf.openFile(noteFile);
+          // Set cursor after view is ready
+          const view = leaf.view as any;
+          if (view?.editor) {
+            view.editor.setCursor({ line: cursorLine, ch: 0 });
+            view.editor.scrollIntoView({ from: { line: cursorLine, ch: 0 }, to: { line: cursorLine, ch: 0 } }, true);
+          }
         }
         await this.plugin.openLibraryMedia(entry.url, null, {
           title: entry.title,
