@@ -124,7 +124,7 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Timestamp Notes Plugin" });
+    new Setting(containerEl).setName("Smart Media Notes").setHeading();
 
     new Setting(containerEl)
       .setName("Title")
