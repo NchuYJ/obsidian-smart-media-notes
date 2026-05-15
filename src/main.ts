@@ -166,7 +166,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     );
 
     // voice-bar code block processor
-    this.registerMarkdownCodeBlockProcessor(
+        this.registerMarkdownCodeBlockProcessor(
       "voice-bar",
       (source: string, el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
         const filePath = source.trim();
@@ -180,34 +180,55 @@ export default class SmartMediaNotesPlugin extends Plugin {
           return;
         }
 
+        // Compact voice bar with duration display
         const container = el.createEl("div");
         container.style.cssText =
-          "display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:20px;background:var(--background-modifier-hover);cursor:pointer;user-select:none;max-width:260px;min-width:140px;border:1px solid var(--background-modifier-border);";
+          "display:inline-flex;align-items:center;gap:5px;padding:4px 10px;" +
+          "border-radius:14px;background:var(--background-modifier-hover);" +
+          "cursor:pointer;user-select:none;max-width:220px;min-width:80px;" +
+          "border:1px solid var(--background-modifier-border);";
 
-        const playBtn = container.createEl("span", { text: "▶" });
-        playBtn.style.cssText = "font-size:16px;flex-shrink:0;line-height:1;";
+        // Play/pause button
+        const playBtn = container.createEl("span", { text: "\u25B6" });
+        playBtn.style.cssText =
+          "font-size:11px;flex-shrink:0;line-height:1;width:14px;text-align:center;";
 
+        // Waveform bars (shorter, fewer, cleaner)
         const waveContainer = container.createEl("div");
         waveContainer.style.cssText =
-          "display:flex;align-items:center;gap:2px;flex:1;height:28px;overflow:hidden;";
+          "display:flex;align-items:center;gap:1.5px;flex:1;height:16px;overflow:hidden;";
 
-        const barCount = 22;
+        const barCount = 14;
         for (let i = 0; i < barCount; i++) {
-          const height =
-            4 +
-            Math.abs(
-              Math.sin(i * 0.7 + 2) * 18 + Math.sin(i * 1.3) * 6,
-            );
+          const h =
+            2 + Math.abs(Math.sin(i * 0.85 + 1.5) * 10 + Math.sin(i * 1.7) * 3);
           const bar = waveContainer.createEl("div");
-          bar.style.cssText = `width:2px;height:${height}px;border-radius:1px;background:var(--interactive-accent);flex-shrink:0;transition:background 0.2s;`;
+          bar.style.cssText =
+            `width:2px;height:${Math.round(h)}px;border-radius:1px;` +
+            "background:var(--interactive-accent);flex-shrink:0;transition:background 0.2s, opacity 0.2s;";
         }
 
+        // Duration label (mm:ss)
+        const durationSpan = container.createEl("span");
+        durationSpan.style.cssText =
+          "font-size:10px;font-weight:500;color:var(--text-muted);" +
+          "font-variant-numeric:tabular-nums;flex-shrink:0;min-width:30px;text-align:center;";
+        durationSpan.textContent = "--:--";
+
+        // Current time label (shown during playback)
+        const currentSpan = container.createEl("span");
+        currentSpan.style.cssText =
+          "font-size:10px;font-weight:500;color:var(--text-accent);" +
+          "font-variant-numeric:tabular-nums;flex-shrink:0;min-width:30px;text-align:center;display:none;";
+
+        // Delete button
         const deleteBtn = container.createEl("span", {
-          text: "×",
+          text: "\u00D7",
           title: "Delete voice recording",
         });
         deleteBtn.style.cssText =
-          "font-size:16px;color:var(--text-muted);flex-shrink:0;cursor:pointer;padding:0 2px;line-height:1;opacity:0.5;transition:opacity 0.15s;";
+          "font-size:12px;color:var(--text-muted);flex-shrink:0;cursor:pointer;" +
+          "padding:0 2px;line-height:1;opacity:0.5;transition:opacity 0.15s, color 0.15s;";
         deleteBtn.addEventListener("mouseenter", () => {
           deleteBtn.style.opacity = "1";
           deleteBtn.style.color = "var(--text-error)";
@@ -225,7 +246,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
             try {
               const content = await this.app.vault.read(noteFile);
               const escaped = filePath.replace(
-                /[.*+?^${}()|[\]\\]/g,
+                /[.*+?${}()|[\]\\]/g,
                 "\\$&",
               );
               const regex = new RegExp(
@@ -239,6 +260,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           new Notice("Voice recording deleted.");
         });
 
+        // Hidden audio element
         const audio = container.createEl("audio", {
           attr: {
             src: this.app.vault.getResourcePath(file),
@@ -248,40 +270,59 @@ export default class SmartMediaNotesPlugin extends Plugin {
         });
 
         let playing = false;
+
+        // Format seconds to mm:ss
+        function fmtSec(sec: number): string {
+          const m = Math.floor(sec / 60);
+          const s = Math.floor(sec % 60);
+          return m + ":" + (s < 10 ? "0" : "") + s;
+        }
+
+        // Show total duration once loaded
+        audio.addEventListener("loadedmetadata", () => {
+          if (audio.duration && isFinite(audio.duration)) {
+            durationSpan.textContent = fmtSec(audio.duration);
+          }
+        });
+
         audio.addEventListener("timeupdate", () => {
           if (audio.duration) {
+            currentSpan.textContent = fmtSec(audio.currentTime);
+            currentSpan.style.display = "inline";
+
             const pct = audio.currentTime / audio.duration;
             const bars = waveContainer.querySelectorAll("div");
             const litCount = Math.round(pct * bars.length);
             bars.forEach((bar, i) => {
-              (bar as HTMLElement).style.background =
-                i < litCount
-                  ? "var(--text-accent)"
-                  : "var(--interactive-accent)";
-              (bar as HTMLElement).style.opacity =
-                i < litCount ? "1" : "0.5";
+              const b = bar as HTMLElement;
+              b.style.background =
+                i < litCount ? "var(--text-accent)" : "var(--interactive-accent)";
+              b.style.opacity = i < litCount ? "1" : "0.35";
             });
           }
         });
+
         audio.addEventListener("ended", () => {
           playing = false;
-          playBtn.textContent = "▶";
+          playBtn.textContent = "\u25B6";
+          currentSpan.style.display = "none";
           const bars = waveContainer.querySelectorAll("div");
           bars.forEach((bar) => {
-            (bar as HTMLElement).style.background =
-              "var(--interactive-accent)";
-            (bar as HTMLElement).style.opacity = "0.5";
+            (bar as HTMLElement).style.background = "var(--interactive-accent)";
+            (bar as HTMLElement).style.opacity = "0.35";
           });
         });
+
+        // Toggle play/pause on click
         container.addEventListener("click", () => {
           if (playing) {
             audio.pause();
             playing = false;
-            playBtn.textContent = "▶";
+            playBtn.textContent = "\u25B6";
           } else {
             audio.play().catch(() => {});
             playing = true;
-            playBtn.textContent = "⏸";
+            playBtn.textContent = "\u23F8";
           }
         });
       },
