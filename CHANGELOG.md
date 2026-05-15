@@ -18,6 +18,19 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [2026-05-15] — Saved Media UI Overhaul: Details Collapse, Note Tag Sync, Tag Filter
+
+### Added
+- **Saved Media collapsible UI**: Section now uses `<details>` + `<summary>` pattern, matching RSS Subscriptions and Media Folders for visual consistency
+- **Note frontmatter tag auto-sync**: `trackTimestamp()` reads the active note's YAML frontmatter `tags` field and merges them into the Saved Media entry on each open. Manual tags are preserved and merged with frontmatter tags.
+- **Tag filter bar**: Saved Media now shows a filter bar at the top with all unique tags. Click a tag to filter by it; click "All" to clear. Active tag is highlighted.
+- **Tag pills click to filter**: Clicking any tag pill on an entry now activates the tag filter for that tag (instead of removing it as before)
+
+### Changed
+- Saved Media section UI unified with RSS/Folders (`<details>` with count). `_savedMediaFilterTag` state preserved across re-renders.
+
+---
+
 ## [2026-05-15] — Configurable Media Formats + Voice Bar Overhaul
 
 ### Added
