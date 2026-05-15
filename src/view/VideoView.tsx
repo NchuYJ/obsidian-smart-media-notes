@@ -110,7 +110,7 @@ export class MediaLibraryView extends ItemView {
   async render(): Promise<void> {
     const container = this.containerEl.children[1];
     container.empty();
-    container.style.padding = "0";
+    container.setCssProps({ padding: "0" });
 
     const wrap = container.createEl("div", {
       style: {
