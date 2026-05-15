@@ -2,6 +2,8 @@
 
 An [Obsidian](https://obsidian.md) plugin for media-powered note-taking. Open videos and audio, insert timestamps, import subtitles, record voice notes, browse RSS podcasts, and manage vault media — all from inside your notes.
 
+> **Built on** [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [@juliang22](https://github.com/juliang22) — the original timestamp-note plugin for Obsidian. Smart Media Notes extends it with media player, subtitle import, voice recording, RSS browser, vault browser, saved media collection, and dictation mode.
+
 ## Features
 
 - 🎬 **Media Player** — Open video/audio from URLs, vault files, or local system paths in a split pane
