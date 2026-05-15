@@ -1,4 +1,4 @@
-import {
+﻿import {
   App,
   Editor,
   FuzzySuggestModal,
@@ -384,12 +384,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
                 "```timestamp-url\n" + selected + "\n```\n",
               );
           this.editor = editor;
-          this.trackTimestamp(selected, {
+          await this.trackTimestamp(selected, {
             displayPath: selected,
             sourceLabel: "URL",
             title: selected,
           });
-          this.refreshLibraryView();
+          await this.refreshLibraryView();
         } else {
           editor.replaceSelection(ERRORS["INVALID_URL"]);
         }
@@ -1118,10 +1118,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   
   // ---- Timestamp collection ----
-  trackTimestamp(url: string, meta: { displayPath?: string; sourceLabel?: string; title?: string; }): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async trackTimestamp(url: string, meta: { displayPath?: string; sourceLabel?: string; title?: string; }): Promise<void> {
     const activeFile = this.app.workspace.getActiveFile();
     const notePath = activeFile?.path || "";
-    const noteTitle = activeFile?.basename || "";
     const entry: TimestampEntry = {
       url: url,
       displayPath: meta.displayPath || url,
@@ -1132,12 +1132,25 @@ export default class SmartMediaNotesPlugin extends Plugin {
       lastOpened: Date.now(),
     };
     const collection = this.settings.timestampCollection || [];
+
+    // Auto-sync frontmatter tags from the note file
+    if (activeFile && activeFile instanceof this.app.vault.fileClass) {
+      try {
+        const cache = this.app.metadataCache.getFileCache(activeFile);
+        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          entry.tags = [...cache.frontmatter.tags];
+        }
+      } catch (_) { /* ignore frontmatter parse errors */ }
+    }
+
     // Deduplicate by url+notePath
     const existing = collection.findIndex(
       (e) => e.url === entry.url && e.notePath === entry.notePath
     );
     if (existing >= 0) {
-      entry.tags = collection[existing].tags;
+      // Merge frontmatter tags with existing manual tags
+      const merged = new Set([...entry.tags, ...collection[existing].tags]);
+      entry.tags = [...merged];
       collection[existing] = entry;
     } else {
       collection.unshift(entry);
@@ -1145,7 +1158,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     // Keep max 100 entries
     if (collection.length > 100) collection.length = 100;
     this.settings.timestampCollection = collection;
-    this.saveSettings();
+    await this.saveSettings();
   }
 
   // ---- View management ----
@@ -1709,7 +1722,7 @@ class PodcastModal extends Modal {
           sourceLabel: this.feedTitle,
           displayPath: ep.url,
         });
-        this.plugin.refreshLibraryView();
+        await this.plugin.refreshLibraryView();
       });
     });
   }

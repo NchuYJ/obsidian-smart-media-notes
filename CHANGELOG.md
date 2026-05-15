@@ -6,6 +6,18 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [2026-05-15] — Fixes: Voice Bar Duration, Timestamp Collection Connected, Collapsible Library
+
+### Fixed
+- **Voice bar duration display**: Added `durationchange` + `canplay` event listeners and 500ms timeout fallback for reliable duration loading in Obsidian's render pipeline. Duration label now hides during playback (countdown shown instead) and restores on end.
+- **Timestamp collection connected**: `trackTimestamp()` was fully implemented but **never called** — now correctly invoked from `trigger-player` command, `openLibraryMedia()`, and podcast modal episode selection. Collection auto-refreshes the library view after each addition.
+
+### Changed
+- **Timestamps tracked on creation**: When inserting `\`\`\`timestamp-url` blocks via trigger-player, library clicks, or podcast episodes, the entry is automatically added to Saved Media collection.
+- **Library sections now collapsible**: RSS Subscriptions and Media Folders sections wrapped in `<details>` elements with summary headers — default to expanded when content exists. Prevents overflow when many feeds/folders are configured.
+
+---
+
 ## [2026-05-15] — Configurable Media Formats + Voice Bar Overhaul
 
 ### Added

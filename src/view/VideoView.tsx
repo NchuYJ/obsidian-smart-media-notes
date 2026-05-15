@@ -156,25 +156,31 @@ export class MediaLibraryView extends ItemView {
       lastOpened: number;
     }>;
 
-    const section = parent.createEl("div", {
+    const section = parent.createEl("details", {
       style: { padding: "12px 12px 0" },
     });
-    section.createEl("div", {
-      text: "Saved Media",
+    const summary = section.createEl("summary");
+    summary.style.cssText =
+      "font-size:11px;font-weight:700;color:var(--text-muted);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    summary.createEl("span", {
+      text: " Saved Media",
+      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
+    });
+    summary.createEl("span", {
+      text: String(collection.length),
       style: {
-        fontSize: "11px",
-        fontWeight: "700",
-        color: "var(--text-muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.5px",
-        margin: "0 4px 10px",
+        fontSize: "10px",
+        color: "var(--text-faint)",
+        fontWeight: "400",
       },
     });
+    if (collection.length) section.open = true;
 
     if (!collection.length) {
       section.createEl("div", {
-        text:
-          "Media you open via \`\`\`timestamp-url will appear here. \nClick to jump to the note, click ✕ to remove.",
+        text: "Media you open via \`\`\`timestamp-url will appear here.",
         style: {
           margin: "0 4px 12px",
           padding: "12px",
@@ -188,13 +194,93 @@ export class MediaLibraryView extends ItemView {
       return;
     }
 
+    // ---- Collect all unique tags for filter bar ----
+    const allTags = [...new Set(collection.flatMap((e) => e.tags))].sort();
+    const activeFilterTag = this._savedMediaFilterTag || "";
+
+    // Tag filter bar
+    const filterBar = section.createEl("div", {
+      style: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px",
+        margin: "0 0 10px",
+        padding: "0 2px",
+        alignItems: "center",
+      },
+    });
+    const allPill = filterBar.createEl("span", {
+      text: "All",
+      style: {
+        fontSize: "9px",
+        padding: "2px 8px",
+        borderRadius: "8px",
+        border: "1px solid var(--background-modifier-border)",
+        color: activeFilterTag ? "var(--text-faint)" : "var(--text-on-accent)",
+        background: activeFilterTag ? "transparent" : "var(--interactive-accent)",
+        cursor: "pointer",
+        transition: "all 0.12s",
+      },
+    });
+    allPill.addEventListener("click", () => {
+      this._savedMediaFilterTag = "";
+      this.render();
+    });
+    allTags.forEach((tag) => {
+      const isActive = activeFilterTag === tag;
+      const pill = filterBar.createEl("span", {
+        text: tag,
+        style: {
+          fontSize: "9px",
+          padding: "2px 8px",
+          borderRadius: "8px",
+          border: "1px solid var(--background-modifier-border)",
+          color: isActive ? "var(--text-on-accent)" : "var(--text-muted)",
+          background: isActive ? "var(--interactive-accent)" : "transparent",
+          cursor: "pointer",
+          transition: "all 0.12s",
+        },
+      });
+      pill.addEventListener("click", () => {
+        this._savedMediaFilterTag = tag === activeFilterTag ? "" : tag;
+        this.render();
+      });
+      pill.addEventListener("mouseenter", () => {
+        if (!isActive) pill.style.background = "var(--background-modifier-hover)";
+      });
+      pill.addEventListener("mouseleave", () => {
+        if (!isActive) pill.style.background = "transparent";
+      });
+    });
+
     // Sort newest first
     const sorted = [...collection].sort((a, b) => b.lastOpened - a.lastOpened);
+    const filtered = activeFilterTag
+      ? sorted.filter((e) => e.tags.includes(activeFilterTag))
+      : sorted;
 
-    sorted.forEach((entry, idx) => {
+    if (!filtered.length) {
+      section.createEl("div", {
+        text: activeFilterTag
+          ? `No saved media tagged "${activeFilterTag}".`
+          : "No saved media found.",
+        style: {
+          margin: "0 4px 12px",
+          padding: "12px",
+          border: "1px dashed var(--background-modifier-border)",
+          borderRadius: "8px",
+          color: "var(--text-muted)",
+          fontSize: "11px",
+          lineHeight: "1.5",
+        },
+      });
+      return;
+    }
+
+    filtered.forEach((entry) => {
       const row = section.createEl("div");
       row.style.cssText =
-        "margin-bottom:8px;padding:10px 12px;border:1px solid var(--background-modifier-border);" +
+        "margin-bottom:6px;padding:10px 12px;border:1px solid var(--background-modifier-border);" +
         "border-radius:10px;background:var(--background-secondary);cursor:pointer;" +
         "transition:background 0.15s;";
       row.addEventListener("mouseenter", () => {
@@ -204,7 +290,7 @@ export class MediaLibraryView extends ItemView {
         row.style.background = "var(--background-secondary)";
       });
 
-      // Title line: click to jump to note
+      // Title line
       const titleRow = row.createEl("div", {
         style: {
           display: "flex",
@@ -213,7 +299,6 @@ export class MediaLibraryView extends ItemView {
           marginBottom: "4px",
         },
       });
-
       const titleEl = titleRow.createEl("span", {
         text: entry.title || entry.displayPath,
         style: {
@@ -229,13 +314,20 @@ export class MediaLibraryView extends ItemView {
 
       // Remove button
       const removeBtn = titleRow.createEl("span", {
-        text: "✕",
+        text: "\u2715",
         title: "Remove from collection",
       });
       removeBtn.style.cssText =
-        "font-size:10px;color:var(--text-faint);cursor:pointer;padding:2px;opacity:0.4;transition:opacity 0.15s;";
-      removeBtn.addEventListener("mouseenter", () => { removeBtn.style.opacity = "1"; removeBtn.style.color = "var(--text-error)"; });
-      removeBtn.addEventListener("mouseleave", () => { removeBtn.style.opacity = "0.4"; removeBtn.style.color = "var(--text-faint)"; });
+        "font-size:10px;color:var(--text-faint);cursor:pointer;padding:2px;opacity:0.4;" +
+        "transition:opacity 0.15s, color 0.15s;";
+      removeBtn.addEventListener("mouseenter", () => {
+        removeBtn.style.opacity = "1";
+        removeBtn.style.color = "var(--text-error)";
+      });
+      removeBtn.addEventListener("mouseleave", () => {
+        removeBtn.style.opacity = "0.4";
+        removeBtn.style.color = "var(--text-faint)";
+      });
       removeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const coll = this.plugin.settings.timestampCollection || [];
@@ -261,10 +353,13 @@ export class MediaLibraryView extends ItemView {
           alignItems: "center",
         },
       });
-      infoLine.createEl("span", { text: entry.sourceLabel || "", style: { opacity: "0.6" } });
+      infoLine.createEl("span", {
+        text: entry.sourceLabel || "",
+        style: { opacity: "0.6" },
+      });
       if (entry.notePath) {
         const noteLink = infoLine.createEl("span", {
-          text: "📄 " + entry.notePath.split("/").pop()?.replace(/.md$/, "") || "",
+          text: "\uD83D\uDCC4 " + (entry.notePath.split("/").pop()?.replace(/.md$/, "") || ""),
           style: { cursor: "pointer", color: "var(--text-accent)" },
         });
         noteLink.addEventListener("click", (e) => {
@@ -300,16 +395,8 @@ export class MediaLibraryView extends ItemView {
         });
         pill.addEventListener("click", (e) => {
           e.stopPropagation();
-          const coll = this.plugin.settings.timestampCollection || [];
-          const pos = coll.findIndex(
-            (e: any) => e.url === entry.url && e.notePath === entry.notePath
-          );
-          if (pos >= 0) {
-            coll[pos].tags = coll[pos].tags.filter((t: string) => t !== tag);
-            this.plugin.settings.timestampCollection = coll;
-            this.plugin.saveSettings();
-            this.render();
-          }
+          this._savedMediaFilterTag = tag;
+          this.render();
         });
       });
 
@@ -327,7 +414,6 @@ export class MediaLibraryView extends ItemView {
       });
       addTagBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        // Create inline input
         const oldBtn = addTagBtn;
         oldBtn.style.display = "none";
         const input = tagRow.createEl("input");
@@ -377,7 +463,6 @@ export class MediaLibraryView extends ItemView {
       });
     });
   }
-
   private renderRssSection(parent: HTMLElement): void {
     const feeds = (this.plugin.settings.rssSubscriptions || [])
       .map((feed: any) =>
