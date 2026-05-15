@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+﻿import { ItemView, WorkspaceLeaf } from "obsidian";
 import React from "react";
 import { createRoot, Root } from "react-dom/client";
 import ReactDOM from "react-dom";
@@ -176,7 +176,7 @@ export class MediaLibraryView extends ItemView {
         fontWeight: "400",
       },
     });
-    if (collection.length) section.open = true;
+    // Closed by default
 
     if (!collection.length) {
       section.createEl("div", {
@@ -195,65 +195,64 @@ export class MediaLibraryView extends ItemView {
     }
 
     // ---- Collect all unique tags for filter bar ----
-    const allTags = [...new Set(collection.flatMap((e) => e.tags))].sort();
+    const allTags = [...new Set(collection.reduce((acc, e) => acc.concat(e.tags), ([] as string[])))].sort();
     const activeFilterTag = this._savedMediaFilterTag || "";
 
-    // Tag filter bar
-    const filterBar = section.createEl("div", {
-      style: {
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "4px",
-        margin: "0 0 10px",
-        padding: "0 2px",
-        alignItems: "center",
-      },
-    });
-    const allPill = filterBar.createEl("span", {
-      text: "All",
-      style: {
-        fontSize: "9px",
-        padding: "2px 8px",
-        borderRadius: "8px",
-        border: "1px solid var(--background-modifier-border)",
-        color: activeFilterTag ? "var(--text-faint)" : "var(--text-on-accent)",
-        background: activeFilterTag ? "transparent" : "var(--interactive-accent)",
-        cursor: "pointer",
-        transition: "all 0.12s",
-      },
-    });
-    allPill.addEventListener("click", () => {
-      this._savedMediaFilterTag = "";
-      this.render();
-    });
-    allTags.forEach((tag) => {
-      const isActive = activeFilterTag === tag;
-      const pill = filterBar.createEl("span", {
-        text: tag,
+    // Tag filter bar — integrated into the summary row
+    if (allTags.length) {
+      const filterBar = section.createEl("div", {
         style: {
-          fontSize: "9px",
-          padding: "2px 8px",
-          borderRadius: "8px",
-          border: "1px solid var(--background-modifier-border)",
-          color: isActive ? "var(--text-on-accent)" : "var(--text-muted)",
-          background: isActive ? "var(--interactive-accent)" : "transparent",
-          cursor: "pointer",
-          transition: "all 0.12s",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "4px",
+          margin: "0 0 8px",
+          alignItems: "center",
         },
       });
-      pill.addEventListener("click", () => {
-        this._savedMediaFilterTag = tag === activeFilterTag ? "" : tag;
+      const allPill = filterBar.createEl("span", {
+        text: "All",
+        style: {
+          fontSize: "10px",
+          padding: "2px 8px",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontWeight: activeFilterTag ? "400" : "600",
+          color: activeFilterTag ? "var(--text-muted)" : "var(--text-on-accent)",
+          background: activeFilterTag ? "transparent" : "var(--interactive-accent)",
+          border: "1px solid " + (activeFilterTag ? "var(--background-modifier-border)" : "var(--interactive-accent)"),
+        },
+      });
+      allPill.addEventListener("click", () => {
+        this._savedMediaFilterTag = "";
         this.render();
       });
-      pill.addEventListener("mouseenter", () => {
-        if (!isActive) pill.style.background = "var(--background-modifier-hover)";
+      allTags.forEach((tag) => {
+        const isActive = activeFilterTag === tag;
+        const pill = filterBar.createEl("span", {
+          text: tag,
+          style: {
+            fontSize: "10px",
+            padding: "2px 8px",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontWeight: isActive ? "600" : "400",
+            color: isActive ? "var(--text-on-accent)" : "var(--text-muted)",
+            background: isActive ? "var(--interactive-accent)" : "transparent",
+            border: "1px solid " + (isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)"),
+          },
+        });
+        pill.addEventListener("click", () => {
+          this._savedMediaFilterTag = tag === activeFilterTag ? "" : tag;
+          this.render();
+        });
+        pill.addEventListener("mouseenter", () => {
+          if (!isActive) pill.style.borderColor = "var(--text-muted)";
+        });
+        pill.addEventListener("mouseleave", () => {
+          if (!isActive) pill.style.borderColor = "var(--background-modifier-border)";
+        });
       });
-      pill.addEventListener("mouseleave", () => {
-        if (!isActive) pill.style.background = "transparent";
-      });
-    });
-
-    // Sort newest first
+    }    // Sort newest first
     const sorted = [...collection].sort((a, b) => b.lastOpened - a.lastOpened);
     const filtered = activeFilterTag
       ? sorted.filter((e) => e.tags.includes(activeFilterTag))
@@ -491,7 +490,7 @@ export class MediaLibraryView extends ItemView {
       },
     });
     // Default to expanded if there are feeds
-    if (feeds.length) section.open = true;
+    // Closed by default
 
     if (!feeds.length) {
       const empty = section.createEl("div", {
@@ -683,7 +682,7 @@ export class MediaLibraryView extends ItemView {
       text: " Media Folders",
       style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
     });
-    if (folders.length) section.open = true;
+    // Closed by default
 
     if (!folders.length) {
       const empty = section.createEl("div", {

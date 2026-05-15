@@ -1094,9 +1094,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
       sourceLabel?: string;
       displayPath?: string;
     },
+    options?: { skipInsert?: boolean },
   ): Promise<void> {
     const editor = this.getActiveEditor();
-    if (editor && this.settings.autoInsertLibraryNote) {
+    if (editor && this.settings.autoInsertLibraryNote && !options?.skipInsert) {
       this.editor = editor;
       editor.replaceSelection(this.buildLibraryNote(url, meta || {}));
     }
