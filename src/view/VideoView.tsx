@@ -176,7 +176,10 @@ export class MediaLibraryView extends ItemView {
         fontWeight: "400",
       },
     });
-    // Closed by default
+    // Restore open state to avoid collapse on tag filter clicks
+    if (this._savedMediaOpen) section.open = true;
+    // Listen for toggle to track open state
+    section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
 
     if (!collection.length) {
       return;
@@ -387,54 +390,6 @@ export class MediaLibraryView extends ItemView {
         });
       });
 
-      // Add tag button
-      const addTagBtn = tagRow.createEl("span", {
-        text: "+tag",
-        style: {
-          fontSize: "9px",
-          padding: "1px 6px",
-          borderRadius: "8px",
-          border: "1px dashed var(--background-modifier-border)",
-          color: "var(--text-faint)",
-          cursor: "pointer",
-        },
-      });
-      addTagBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const oldBtn = addTagBtn;
-        oldBtn.style.display = "none";
-        const input = tagRow.createEl("input");
-        input.style.cssText =
-          "font-size:9px;width:50px;padding:1px 4px;border:1px solid var(--interactive-accent);" +
-          "border-radius:6px;background:var(--background-primary);color:var(--text-normal);";
-        input.placeholder = "tag";
-        input.focus();
-        const finish = () => {
-          const val = input.value.trim();
-          input.remove();
-          oldBtn.style.display = "";
-          if (val) {
-            const coll = this.plugin.settings.timestampCollection || [];
-            const pos = coll.findIndex(
-              (e: any) => e.url === entry.url && e.notePath === entry.notePath
-            );
-            if (pos >= 0) {
-              if (!coll[pos].tags.includes(val)) {
-                coll[pos].tags.push(val);
-                this.plugin.settings.timestampCollection = coll;
-                this.plugin.saveSettings();
-                this.render();
-              }
-            }
-          }
-        };
-        input.addEventListener("keydown", (ke) => {
-          if (ke.key === "Enter") finish();
-          if (ke.key === "Escape") { input.remove(); oldBtn.style.display = ""; }
-        });
-        input.addEventListener("blur", finish);
-      });
-
       // Click row to jump to note and open media
       row.addEventListener("click", async () => {
         const noteFile = this.app.vault.getAbstractFileByPath(entry.notePath);
@@ -478,7 +433,10 @@ export class MediaLibraryView extends ItemView {
       },
     });
     // Default to expanded if there are feeds
-    // Closed by default
+    // Restore open state to avoid collapse on tag filter clicks
+    if (this._savedMediaOpen) section.open = true;
+    // Listen for toggle to track open state
+    section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
 
     if (!feeds.length) {
       const empty = section.createEl("div", {
@@ -670,7 +628,10 @@ export class MediaLibraryView extends ItemView {
       text: " Media Folders",
       style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
     });
-    // Closed by default
+    // Restore open state to avoid collapse on tag filter clicks
+    if (this._savedMediaOpen) section.open = true;
+    // Listen for toggle to track open state
+    section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
 
     if (!folders.length) {
       const empty = section.createEl("div", {
