@@ -279,15 +279,21 @@ export default class SmartMediaNotesPlugin extends Plugin {
           return m + ":" + (s < 10 ? "0" : "") + s;
         }
 
-        // Show total duration once loaded
-        audio.addEventListener("loadedmetadata", () => {
-          if (audio.duration && isFinite(audio.duration)) {
+        // Show total duration once loaded (with fallback events)
+        function updateDuration() {
+          if (audio.duration && isFinite(audio.duration) && audio.duration > 0) {
             durationSpan.textContent = fmtSec(audio.duration);
           }
-        });
+        }
+        audio.addEventListener("loadedmetadata", updateDuration);
+        audio.addEventListener("durationchange", updateDuration);
+        audio.addEventListener("canplay", updateDuration);
+        const durFallbackTimer = setTimeout(updateDuration, 500);
 
         audio.addEventListener("timeupdate", () => {
           if (audio.duration) {
+            // Hide the static duration label during playback, show countdown
+            durationSpan.style.display = "none";
             const remain = audio.duration - audio.currentTime;
             currentSpan.textContent = "-" + fmtSec(remain);
             currentSpan.style.display = "inline";
@@ -308,6 +314,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           playing = false;
           playBtn.textContent = "\u25B6";
           currentSpan.style.display = "none";
+          durationSpan.style.display = "";
           const bars = waveContainer.querySelectorAll("div");
           bars.forEach((bar) => {
             (bar as HTMLElement).style.background = "var(--interactive-accent)";
@@ -334,7 +341,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "trigger-player",
       name: "Open media player (copy url or path and use hotkey)",
-      editorCallback: (editor: Editor) => {
+      editorCallback: async (editor: Editor) => {
         const selected = editor.getSelection().trim();
         const resolved = this.resolveMediaUrl(selected);
         if (resolved) {
@@ -355,6 +362,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
                 "```timestamp-url\n" + resolved.displayPath + "\n```\n",
               );
           this.editor = editor;
+          this.trackTimestamp(resolved.playableUrl, {
+            displayPath: resolved.displayPath,
+            sourceLabel: resolved.isVaultFile ? "Vault" : resolved.isSystemFile ? "System" : "URL",
+            title: resolved.displayPath.split("/").pop() || resolved.displayPath,
+          });
+          this.refreshLibraryView();
         } else if (this.isPodcastUrl(selected)) {
           this.editor = editor;
           new PodcastModal(this.app, this, selected, editor).open();
@@ -371,6 +384,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
                 "```timestamp-url\n" + selected + "\n```\n",
               );
           this.editor = editor;
+          this.trackTimestamp(selected, {
+            displayPath: selected,
+            sourceLabel: "URL",
+            title: selected,
+          });
+          this.refreshLibraryView();
         } else {
           editor.replaceSelection(ERRORS["INVALID_URL"]);
         }
@@ -1088,6 +1107,13 @@ export default class SmartMediaNotesPlugin extends Plugin {
       editor!,
       vaultFile || null,
     );
+    // Track this media in the saved media collection
+    this.trackTimestamp(url, {
+      displayPath: meta.displayPath || url,
+      sourceLabel: meta.sourceLabel || "",
+      title: meta.title || meta.displayPath || url,
+    });
+    await this.refreshLibraryView();
   }
 
   
@@ -1678,6 +1704,12 @@ class PodcastModal extends Modal {
           "\n";
         this.editor?.replaceSelection(note);
         await this.plugin.activateView(ep.url, this.editor);
+        this.plugin.trackTimestamp(ep.url, {
+          title: ep.title,
+          sourceLabel: this.feedTitle,
+          displayPath: ep.url,
+        });
+        this.plugin.refreshLibraryView();
       });
     });
   }

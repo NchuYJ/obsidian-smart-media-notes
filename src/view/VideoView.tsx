@@ -385,20 +385,28 @@ export class MediaLibraryView extends ItemView {
       )
       .filter((feed: any) => feed && feed.url);
 
-    const section = parent.createEl("div", {
+    const section = parent.createEl("details", {
       style: { padding: "12px 12px 0" },
     });
-    section.createEl("div", {
-      text: "RSS Subscriptions",
+    const summary = section.createEl("summary");
+    summary.style.cssText =
+      "font-size:11px;font-weight:700;color:var(--text-muted);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    summary.createEl("span", {
+      text: " RSS Subscriptions",
+      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
+    });
+    summary.createEl("span", {
+      text: String(feeds.length),
       style: {
-        fontSize: "11px",
-        fontWeight: "700",
-        color: "var(--text-muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.5px",
-        margin: "0 4px 10px",
+        fontSize: "10px",
+        color: "var(--text-faint)",
+        fontWeight: "400",
       },
     });
+    // Default to expanded if there are feeds
+    if (feeds.length) section.open = true;
 
     if (!feeds.length) {
       const empty = section.createEl("div", {
@@ -580,18 +588,17 @@ export class MediaLibraryView extends ItemView {
       )
       .map((folder: string) => folder.trim());
 
-    const section = parent.createEl("div", { style: { padding: "12px" } });
-    section.createEl("div", {
-      text: "Media Folders",
-      style: {
-        fontSize: "11px",
-        fontWeight: "700",
-        color: "var(--text-muted)",
-        textTransform: "uppercase",
-        letterSpacing: "0.5px",
-        margin: "0 4px 10px",
-      },
+    const section = parent.createEl("details", { style: { padding: "12px" } });
+    const summary = section.createEl("summary");
+    summary.style.cssText =
+      "font-size:11px;font-weight:700;color:var(--text-muted);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    summary.createEl("span", {
+      text: " Media Folders",
+      style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
     });
+    if (folders.length) section.open = true;
 
     if (!folders.length) {
       const empty = section.createEl("div", {
