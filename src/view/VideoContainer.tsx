@@ -89,6 +89,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
     xlarge: { text: "22px", ts: "16px" },
   };
   const fs = sizeMap[subtitleOverlayFontSize] || sizeMap.large;
+  const subtitleList = subtitles ?? [];
 
   // ---- 副作用 ----
 
@@ -114,7 +115,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   const handleProgress = (state: { playedSeconds: number }) => {
     const currentTime = state.playedSeconds || 0;
-    const nextSubtitle = findCueAtTime(subtitles || [], currentTime);
+    const nextSubtitle = findCueAtTime(subtitleList, currentTime);
     if (nextSubtitle?.start !== activeSubtitle?.start) {
       setActiveSubtitle(nextSubtitle);
       onSubtitleChange(nextSubtitle);
@@ -128,9 +129,9 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
         loopCountRef.current++;
         if (maxCount > 0 && loopCountRef.current >= maxCount) {
           // 达到最大循环次数 → 跳到下一句
-          const idx = (subtitles || []).findIndex((c) => c.start === activeSubtitle.start);
-          if (idx >= 0 && idx < (subtitles || []).length - 1) {
-            playerRef.current.seekTo(subtitles![idx + 1].start);
+          const idx = subtitleList.findIndex((c) => c.start === activeSubtitle.start);
+          if (idx >= 0 && idx < subtitleList.length - 1) {
+            playerRef.current.seekTo(subtitleList[idx + 1].start);
           }
           loopCountRef.current = 0;
         } else {
@@ -189,7 +190,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
       };
 
   const subtitleItems = hasSubtitles
-    ? subtitles!.map((cue, idx) => {
+    ? subtitleList.map((cue, idx) => {
         const isActive = activeSubtitle && activeSubtitle.start === cue.start;
         return (
           <div
@@ -384,7 +385,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
               zIndex: 1,
             }}
           >
-            Subtitles ({subtitles!.length})
+            Subtitles ({subtitleList.length})
           </div>
           {subtitleItems}
         </div>

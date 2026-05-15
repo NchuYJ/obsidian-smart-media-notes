@@ -71,6 +71,20 @@ interface PersistedSettingsData extends Partial<SmartMediaNotesSettings> {
   urlStartTimeMap?: Record<string, number>;
 }
 
+interface NodeFileSystem {
+  readFileSync(path: string): Uint8Array;
+  readdirSync(
+    path: string,
+    options: { withFileTypes: true },
+  ): Array<{ name: string; isDirectory(): boolean }>;
+}
+
+interface NodePathModule {
+  extname(path: string): string;
+  join(...parts: string[]): string;
+  basename(path: string, suffix?: string): string;
+}
+
 const ERRORS: Record<string, string> = {
   INVALID_URL:
     "\n> [!error] Invalid Media URL\n> The highlighted link is not a valid video or audio url. Please try again with a valid link.\n",
@@ -96,6 +110,22 @@ export default class SmartMediaNotesPlugin extends Plugin {
   // 听写模式
   dictationMode: boolean = false;
   dictationLoopTimer: number | null = null;
+
+  private getNodeFs(): NodeFileSystem | null {
+    const globalWithRequire = globalThis as typeof globalThis & {
+      require?: (id: string) => unknown;
+    };
+    const mod = globalWithRequire.require?.("fs");
+    return mod as NodeFileSystem | null;
+  }
+
+  private getNodePath(): NodePathModule | null {
+    const globalWithRequire = globalThis as typeof globalThis & {
+      require?: (id: string) => unknown;
+    };
+    const mod = globalWithRequire.require?.("path");
+    return mod as NodePathModule | null;
+  }
 
   async onload(): Promise<void> {
     this.registerView(VIDEO_VIEW, (leaf) => new VideoView(leaf));
@@ -129,12 +159,18 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const match = row.match(regExp);
           if (match) {
             const div = el.createEl("div");
-          const button = div.createEl("button");
-          button.innerText = match[0];
-          button.setCssProps({
-            "background-color": this.settings.timestampColor,
-            color: this.settings.timestampTextColor,
-          });
+            const button = div.createEl("button", {
+              cls: "smn-dynamic-btn",
+            });
+            button.innerText = match[0];
+            button.style.setProperty(
+              "--smn-btn-bg",
+              this.settings.timestampColor,
+            );
+            button.style.setProperty(
+              "--smn-btn-color",
+              this.settings.timestampTextColor,
+            );
             button.addEventListener("click", () => {
               const seconds = parseTimestampToSeconds(match[0]);
               if (this.player) this.player.seekTo(seconds);
@@ -165,10 +201,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
           button.innerText = display;
           button.title = alias ? alias + "\n" + resolvedDisplay : resolvedDisplay;
           button.addClass("smn-timestamp-url-btn");
-          button.setCssProps({
-            "background-color": this.settings.urlColor,
-            color: this.settings.urlTextColor,
-          });
+          button.addClass("smn-dynamic-btn");
+          button.style.setProperty("--smn-btn-bg", this.settings.urlColor);
+          button.style.setProperty(
+            "--smn-btn-color",
+            this.settings.urlTextColor,
+          );
           button.addEventListener("click", () => {
             void this.activateView(
               resolved.playableUrl,
@@ -179,14 +217,17 @@ export default class SmartMediaNotesPlugin extends Plugin {
           div.appendChild(button);
         } else if (this.isPodcastUrl(raw)) {
           const div = el.createEl("div");
-          const button = div.createEl("button");
-          button.innerText = "🎙 " + raw;
-          button.setCssProps({
-            "background-color": this.settings.urlColor,
-            color: this.settings.urlTextColor,
+          const button = div.createEl("button", {
+            cls: "smn-dynamic-btn",
           });
+          button.innerText = "🎙 " + raw;
+          button.style.setProperty("--smn-btn-bg", this.settings.urlColor);
+          button.style.setProperty(
+            "--smn-btn-color",
+            this.settings.urlTextColor,
+          );
           button.addEventListener("click", () => {
-            new PodcastModal(this.app, this, raw, this.editor!).open();
+            new PodcastModal(this.app, this, raw, this.editor).open();
           });
           div.appendChild(button);
         } else if (/^https?:\/\//i.test(raw)) {
@@ -197,10 +238,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
           button.innerText = display;
           button.title = alias ? alias + "\n" + raw : raw;
           button.addClass("smn-timestamp-url-btn");
-          button.setCssProps({
-            "background-color": this.settings.urlColor,
-            color: this.settings.urlTextColor,
-          });
+          button.addClass("smn-dynamic-btn");
+          button.style.setProperty("--smn-btn-bg", this.settings.urlColor);
+          button.style.setProperty(
+            "--smn-btn-color",
+            this.settings.urlTextColor,
+          );
           button.addEventListener("click", () => {
             void this.activateView(raw, this.editor);
           });
@@ -271,27 +314,31 @@ export default class SmartMediaNotesPlugin extends Plugin {
           title: "Delete voice recording",
           cls: "smn-voice-bar-delete",
         });
-        deleteBtn.addEventListener("click", async (e) => {
+        deleteBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           e.preventDefault();
-          await this.app.fileManager.trashFile(file);
-          const noteFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
-          if (noteFile) {
-            try {
-              const content = await this.app.vault.read(noteFile);
-              const escaped = filePath.replace(
-                /[.*+?${}()|[\]\\]/g,
-                "\\$&",
-              );
-              const regex = new RegExp(
-                "```voice-bar\\n" + escaped + "\\n```\\n?",
-                "g",
-              );
-              const newContent = content.replace(regex, "");
-              await this.app.vault.modify(noteFile, newContent);
-            } catch (_) { /* ignore */ }
-          }
-          new Notice("Voice recording deleted.");
+          void (async () => {
+            await this.app.fileManager.trashFile(file);
+            const noteFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+            if (noteFile instanceof TFile) {
+              try {
+                const content = await this.app.vault.read(noteFile);
+                const escaped = filePath.replace(
+                  /[.*+?${}()|[\]\\]/g,
+                  "\\$&",
+                );
+                const regex = new RegExp(
+                  "```voice-bar\\n" + escaped + "\\n```\\n?",
+                  "g",
+                );
+                const newContent = content.replace(regex, "");
+                await this.app.vault.modify(noteFile, newContent);
+              } catch {
+                // ignore
+              }
+            }
+            new Notice("Voice recording deleted.");
+          })();
         });
 
         // Hidden audio element
@@ -348,8 +395,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           durationSpan.toggleClass("is-hidden", false);
           const bars = waveContainer.querySelectorAll("div");
           bars.forEach((bar) => {
-            (bar as HTMLElement).removeClass("active");
-            (bar as HTMLElement).addClass("idle");
+            bar.removeClass("active");
+            bar.addClass("idle");
           });
         });
 
@@ -384,21 +431,23 @@ export default class SmartMediaNotesPlugin extends Plugin {
             editor,
             resolved.isVaultFile ? resolved.vaultFile : null,
           );
-          this.settings.noteTitle
-            ? editor.replaceSelection(
-                "\n" +
-                  this.settings.noteTitle +
-                  "\n```timestamp-url\n" +
-                  (selectedAlias ? selectedAlias + " | " : "") +
-                  resolved.displayPath +
-                  "\n```\n",
-              )
-            : editor.replaceSelection(
-                "```timestamp-url\n" +
-                  (selectedAlias ? selectedAlias + " | " : "") +
-                  resolved.displayPath +
-                  "\n```\n",
-              );
+          if (this.settings.noteTitle) {
+            editor.replaceSelection(
+              "\n" +
+                this.settings.noteTitle +
+                "\n```timestamp-url\n" +
+                (selectedAlias ? selectedAlias + " | " : "") +
+                resolved.displayPath +
+                "\n```\n",
+            );
+          } else {
+            editor.replaceSelection(
+              "```timestamp-url\n" +
+                (selectedAlias ? selectedAlias + " | " : "") +
+                resolved.displayPath +
+                "\n```\n",
+            );
+          }
           this.editor = editor;
           void this.trackTimestamp(resolved.playableUrl, {
             displayPath: resolved.displayPath,
@@ -413,14 +462,16 @@ export default class SmartMediaNotesPlugin extends Plugin {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
           void this.activateView(selectedUrl, editor);
-          this.settings.noteTitle
-            ? editor.replaceSelection(
-                "\n" + this.settings.noteTitle +
-                "\n```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
-              )
-            : editor.replaceSelection(
-                "```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
-              );
+          if (this.settings.noteTitle) {
+            editor.replaceSelection(
+              "\n" + this.settings.noteTitle +
+              "\n```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
+            );
+          } else {
+            editor.replaceSelection(
+              "```timestamp-url\n" + (selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || "Media") + " | " + selectedUrl + "\n```\n",
+            );
+          }
           this.editor = editor;
           await this.trackTimestamp(selectedUrl, {
             displayPath: selectedUrl,
@@ -518,8 +569,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "open-media-library",
       name: "Open media library sidebar",
-      callback: async () => {
-        await this.activateLibraryView();
+      callback: () => {
+        void this.activateLibraryView();
       },
     });
 
@@ -658,7 +709,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addSettingTab(new TimestampPluginSettingTab(this.app, this));
   }
 
-  async onunload(): Promise<void> {
+  onunload(): void {
     this.stopDictationLoop();
     this.player = null;
     this.editor = null;
@@ -683,8 +734,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
   // ---- System file resolution ----
   async resolveSystemFilePath(systemPath: string): Promise<string | null> {
     try {
-      const fs = require("fs");
-      const path = require("path");
+      const fs = this.getNodeFs();
+      const path = this.getNodePath();
+      if (!fs || !path) return null;
       const buffer = fs.readFileSync(systemPath);
       const ext = path.extname(systemPath).toLowerCase();
       const mimeMap: Record<string, string> = {
@@ -698,7 +750,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
       const mime = mimeMap[ext] || "application/octet-stream";
       const blob = new Blob([buffer], { type: mime });
       return URL.createObjectURL(blob);
-    } catch (_) { /* fs not available */ }
+    } catch {
+      // fs not available
+    }
     try {
       const normalized = systemPath.replace(/\\/g, "/");
       const fileUrl = "file:///" + encodeURI(normalized).replace(/#/g, "%23");
@@ -710,7 +764,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
         const blob = new Blob([response.arrayBuffer]);
         return URL.createObjectURL(blob);
       }
-    } catch (_) { /* fall through */ }
+    } catch {
+      // fall through
+    }
     return null;
   }
 
@@ -728,7 +784,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
         )
       )
         return true;
-    } catch (_) { /* not a URL */ }
+    } catch {
+      // not a URL
+    }
     return false;
   }
 
@@ -787,7 +845,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
             return cues;
           }
         }
-      } catch (e) { /* ignore */ }
+      } catch {
+        // ignore
+      }
     }
     return [];
   }
@@ -837,7 +897,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
           isVaultFile: true,
           vaultFile: file,
         };
-      } catch (_) { /* ignore */ }
+      } catch {
+        // ignore
+      }
     }
     return null;
   }
@@ -1029,14 +1091,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
   getMediaFilesInFolder(folderPath: string): MediaFileEntry[] {
     if (this.isSystemFolderPath(folderPath)) {
       try {
-        const fs = require("fs");
-        const path = require("path");
+        const fs = this.getNodeFs();
+        const path = this.getNodePath();
+        if (!fs || !path) return [];
         const found: MediaFileEntry[] = [];
         const walk = (dir: string) => {
           let entries: Array<{ name: string; isDirectory(): boolean }>;
           try {
             entries = fs.readdirSync(dir, { withFileTypes: true });
-          } catch (_) {
+          } catch {
             entries = [];
           }
           for (const entry of entries) {
@@ -1062,7 +1125,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
         return found.sort((a, b) =>
           a.path.localeCompare(b.path, undefined, { numeric: true }),
         );
-      } catch (_) {
+      } catch {
         return [];
       }
     }
@@ -1164,7 +1227,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   // ---- Timestamp collection ----
   async trackTimestamp(url: string, _meta: { displayPath?: string; sourceLabel?: string; title?: string; }): Promise<void> {
-    const title = _meta.title || _meta.displayPath || urlToSafeName(url);
     const activeFile = this.app.workspace.getActiveFile();
     const notePath = activeFile?.path || "";
     const entry: TimestampEntry = {
@@ -1185,7 +1247,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
         if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
           entry.tags = [...cache.frontmatter.tags];
         }
-      } catch (_) { /* ignore frontmatter parse errors */ }
+      } catch {
+        // ignore frontmatter parse errors
+      }
     }
 
     // Deduplicate by url+notePath
@@ -1245,7 +1309,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
             if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
               fmTags = [...cache.frontmatter.tags];
             }
-          } catch (_) { /* ignore */ }
+          } catch {
+            // ignore
+          }
 
           const entry: TimestampEntry = {
             url,
@@ -1260,7 +1326,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
           };
           newCollection.push(entry);
         }
-      } catch (_) { /* skip unreadable files */ }
+      } catch {
+        // skip unreadable files
+      }
     }
 
     // Cap at 100
@@ -1449,7 +1517,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           isAudio: audio,
         };
         leaf.setEphemeralState(state);
-        await this.saveSettings();
+        void this.saveSettings();
       }
     }
   }
@@ -1501,7 +1569,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     // 不持久化 subtitleLibrary — 它只是运行时缓存
-    const { subtitleLibrary, ...toSave } = this.settings;
+    const { subtitleLibrary: _subtitleLibrary, ...toSave } = this.settings;
     await this.saveData({
       ...toSave,
       urlStartTimeMap: Object.fromEntries(this.settings.urlStartTimeMap),
