@@ -182,7 +182,8 @@ export class MediaLibraryView extends ItemView {
 
     // ---- Collect all unique tags for filter bar ----
     const allTags = [...new Set(collection.reduce((acc, e) => acc.concat(e.tags), ([] as string[])))].sort();
-    const activeFilterTag = this._savedMediaFilterTag || "";
+    const activeFilterTags = (this._savedMediaFilterTags || []) as string[];
+    const hasFilter = activeFilterTags.length > 0;
 
     // Tag filter bar — integrated into the summary row
     if (allTags.length) {
@@ -193,16 +194,16 @@ export class MediaLibraryView extends ItemView {
       allPill.style.cssText =
         "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
         "border-radius:6px;cursor:pointer;" +
-        "font-weight:" + (activeFilterTag ? "400" : "600") + ";" +
-        "color:" + (activeFilterTag ? "var(--text-muted)" : "var(--text-on-accent)") + ";" +
-        "background:" + (activeFilterTag ? "transparent" : "var(--interactive-accent)") + ";" +
-        "border:1px solid " + (activeFilterTag ? "var(--background-modifier-border)" : "var(--interactive-accent)");
+        "font-weight:" + (hasFilter ? "400" : "600") + ";" +
+        "color:" + (hasFilter ? "var(--text-muted)" : "var(--text-on-accent)") + ";" +
+        "background:" + (hasFilter ? "transparent" : "var(--interactive-accent)") + ";" +
+        "border:1px solid " + (hasFilter ? "var(--background-modifier-border)" : "var(--interactive-accent)");
       allPill.addEventListener("click", () => {
-        this._savedMediaFilterTag = "";
+        this._savedMediaFilterTags = [];
         this.render();
       });
       allTags.forEach((tag) => {
-        const isActive = activeFilterTag === tag;
+        const isActive = activeFilterTags.includes(tag);
         const pill = filterBar.createEl("span", { text: tag });
         pill.style.cssText =
           "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
@@ -212,7 +213,11 @@ export class MediaLibraryView extends ItemView {
           "background:" + (isActive ? "var(--interactive-accent)" : "transparent") + ";" +
           "border:1px solid " + (isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)");
         pill.addEventListener("click", () => {
-          this._savedMediaFilterTag = tag === activeFilterTag ? "" : tag;
+          if (activeFilterTags.includes(tag)) {
+            this._savedMediaFilterTags = activeFilterTags.filter(t => t !== tag);
+          } else {
+            this._savedMediaFilterTags = [...activeFilterTags, tag];
+          }
           this.render();
         });
         pill.addEventListener("mouseenter", () => {
@@ -224,14 +229,14 @@ export class MediaLibraryView extends ItemView {
       });
     }    // Sort newest first
     const sorted = [...collection].sort((a, b) => b.lastOpened - a.lastOpened);
-    const filtered = activeFilterTag
-      ? sorted.filter((e) => e.tags.includes(activeFilterTag))
+    const filtered = hasFilter
+      ? sorted.filter((e) => activeFilterTags.every(t => e.tags.includes(t)))
       : sorted;
 
     if (!filtered.length) {
       section.createEl("div", {
-        text: activeFilterTag
-          ? `No saved media tagged "${activeFilterTag}".`
+        text: hasFilter
+          ? `No saved media tagged "${activeFilterTags.join(", ")}".`
           : "No saved media found.",
         style: {
           margin: "0 4px 12px",
@@ -376,7 +381,10 @@ export class MediaLibraryView extends ItemView {
           "color:var(--text-on-accent);cursor:pointer";
         pill.addEventListener("click", (e) => {
           e.stopPropagation();
-          this._savedMediaFilterTag = tag;
+          const current = (this._savedMediaFilterTags || []) as string[];
+          this._savedMediaFilterTags = current.includes(tag)
+            ? current.filter(t => t !== tag)
+            : [...current, tag];
           this.render();
         });
       });
