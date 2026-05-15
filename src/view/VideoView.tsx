@@ -382,7 +382,7 @@ export class MediaLibraryView extends ItemView {
 
       // Tags
       const tagRow = row.createEl("div", {
-        style: { display: "flex", flexWrap: "wrap", gap: "3px", alignItems: "center" },
+        style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" },
       });
       entry.tags.forEach((tag) => {
         const pill = tagRow.createEl("span", {
