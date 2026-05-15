@@ -1,4 +1,4 @@
-﻿import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, WorkspaceLeaf } from "obsidian";
 import React from "react";
 import { createRoot, Root } from "react-dom/client";
 import ReactDOM from "react-dom";
@@ -285,19 +285,6 @@ export class MediaLibraryView extends ItemView {
         },
       });
 
-      // URL display
-      const urlEl = row.createEl("div", {
-        text: entry.displayPath || entry.url,
-        style: {
-          fontSize: "10px",
-          color: "var(--text-faint)",
-          marginBottom: "8px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          opacity: "0.7",
-        },
-      });
 
       // Remove button
       const removeBtn = titleRow.createEl("span", {
