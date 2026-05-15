@@ -4,11 +4,13 @@
   text: string;
 }
 
+import type { TFile } from "obsidian";
+
 export interface MediaFileEntry {
   basename: string;
   path: string;
   playableUrl: string;
-  vaultFile: any | null;
+  vaultFile: TFile | null;
 }
 
 export interface PodcastEpisode {
@@ -24,7 +26,7 @@ export interface ResolvedMedia {
   displayPath: string;
   isVaultFile: boolean;
   isSystemFile?: boolean;
-  vaultFile?: any;
+  vaultFile?: TFile;
 }
 
 // Default media format lists (user can override via plugin settings)
@@ -152,7 +154,7 @@ export function urlToSafeName(url: string): string {
   return name + "_" + absHash.slice(0, 6);
 }
 
-export function normalizeMediaCandidate(value: any): string {
+export function normalizeMediaCandidate(value: unknown): string {
   if (!value || typeof value !== "string") return "";
   let normalized = value.trim();
   const markdownMatch = normalized.match(/^\[[^\]]*\]\((https?:\/\/[^\s)]+)\)$/i);

@@ -61,6 +61,10 @@
   min-width: 30px;
   text-align: center;
 }
+.smn-voice-bar-current.is-hidden,
+.smn-voice-bar-duration.is-hidden {
+  display: none;
+}
 .smn-voice-bar-delete {
   font-size: 12px;
   color: var(--text-muted);
@@ -74,6 +78,13 @@
 .smn-voice-bar-delete:hover {
   opacity: 1;
   color: var(--text-error);
+}
+.smn-hidden-audio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
 }
 
 /* ── Media Library Sidebar ── */
@@ -98,6 +109,26 @@
 }
 .smn-library-section {
   padding: 12px;
+}
+.smn-library-section-block {
+  padding: 12px 12px 0;
+}
+.smn-library-section-block.has-top-border {
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+.smn-library-section-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-normal);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .smn-library-section-label {
   font-size: 11px;
@@ -162,6 +193,37 @@
   font-size: 11px;
   color: var(--text-accent);
 }
+.smn-library-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 8px 0 14px;
+  align-items: center;
+}
+.smn-library-filter-pill {
+  font-size: 10px;
+  padding: 5px 14px;
+  margin-right: 6px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 400;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.smn-library-filter-pill:hover {
+  border-color: var(--text-muted);
+}
+.smn-library-filter-pill.is-active {
+  font-weight: 600;
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+.smn-library-filter-pill.is-active:hover {
+  border-color: var(--interactive-accent);
+}
 .smn-library-body {
   border-top: 1px solid var(--background-modifier-border);
   padding: 8px 0;
@@ -212,6 +274,13 @@
 }
 .smn-folder-row:hover {
   background: var(--background-modifier-hover);
+}
+.smn-subtitle-row:hover:not(.is-active) {
+  background-color: var(--background-modifier-hover) !important;
+}
+.smn-subtitle-row.is-active {
+  background-color: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
 }
 .smn-folder-row-title {
   font-size: 13px;

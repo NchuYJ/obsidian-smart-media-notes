@@ -9,10 +9,9 @@ import {
   WorkspaceLeaf,
   MarkdownPostProcessorContext,
   normalizePath,
+  requestUrl,
   TFile,
 } from "obsidian";
-import React from "react";
-import ReactDOM from "react-dom";
 
 import {
   SmartMediaNotesSettings,
@@ -21,7 +20,6 @@ import {
   TimestampEntry,
 } from "./settings";
 import { VideoView, MediaLibraryView, VIDEO_VIEW, LIBRARY_VIEW } from "./view/VideoView";
-import VideoContainer from "./view/VideoContainer";
 import {
   formatSecondsAsTimestamp,
   parseTimestampToSeconds,
@@ -38,7 +36,40 @@ import {
   SubtitleCue,
   parseTimestampUrlBlock,
   ResolvedMedia,
+  MediaFileEntry,
+  PodcastEpisode,
 } from "./utils";
+
+interface PlayerHandle {
+  seekTo(seconds: number): void;
+  getCurrentTime(): number;
+  props?: {
+    playing?: boolean;
+  };
+}
+
+interface VideoEphemeralState {
+  url: string;
+  setupPlayer: (player: PlayerHandle, setPlaying: (playing: boolean) => void) => void;
+  setupError: (err: string) => void;
+  saveTimeOnUnload: () => Promise<void>;
+  start: number;
+  subtitles: SubtitleCue[];
+  onSubtitleChange: (cue: SubtitleCue | null) => void;
+  showSubtitleOverlay: boolean;
+  showSubtitleBrowser: boolean;
+  subtitleOverlayFontSize?: string;
+  dictationMode?: boolean;
+  dictationLoopCount?: number;
+  dictationLoopGap?: number;
+  playlist?: { files: TFile[]; currentIndex: number } | null;
+  onNavigatePlaylist?: (file: TFile) => Promise<void>;
+  isAudio?: boolean;
+}
+
+interface PersistedSettingsData extends Partial<SmartMediaNotesSettings> {
+  urlStartTimeMap?: Record<string, number>;
+}
 
 const ERRORS: Record<string, string> = {
   INVALID_URL:
@@ -53,8 +84,8 @@ const ERRORS: Record<string, string> = {
 
 export default class SmartMediaNotesPlugin extends Plugin {
   settings!: SmartMediaNotesSettings;
-  player: any = null;
-  setPlaying: any = null;
+  player: PlayerHandle | null = null;
+  setPlaying: ((playing: boolean) => void) | null = null;
   currentUrl: string | null = null;
   currentUrlKey: string | null = null;
   currentSubtitle: SubtitleCue | null = null;
@@ -64,7 +95,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   // 听写模式
   dictationMode: boolean = false;
-  dictationLoopTimer: any = null;
+  dictationLoopTimer: number | null = null;
 
   async onload(): Promise<void> {
     this.registerView(VIDEO_VIEW, (leaf) => new VideoView(leaf));
@@ -85,7 +116,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
       },
     });
     this.addRibbonIcon("library", "Open Smart Media Library", () => {
-      this.activateLibraryView();
+      void this.activateLibraryView();
     });
 
     // timestamp code block processor
@@ -98,10 +129,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const match = row.match(regExp);
           if (match) {
             const div = el.createEl("div");
-            const button = div.createEl("button");
-            button.innerText = match[0];
-            button.setCssProps({ "background-color": this.settings.timestampColor });
-            button.setCssProps({ color: this.settings.timestampTextColor });
+          const button = div.createEl("button");
+          button.innerText = match[0];
+          button.setCssProps({
+            "background-color": this.settings.timestampColor,
+            color: this.settings.timestampTextColor,
+          });
             button.addEventListener("click", () => {
               const seconds = parseTimestampToSeconds(match[0]);
               if (this.player) this.player.seekTo(seconds);
@@ -131,12 +164,13 @@ export default class SmartMediaNotesPlugin extends Plugin {
               : displayRaw;
           button.innerText = display;
           button.title = alias ? alias + "\n" + resolvedDisplay : resolvedDisplay;
-          button.style.cssText =
-            "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-          button.setCssProps({ "background-color": this.settings.urlColor });
-          button.setCssProps({ color: this.settings.urlTextColor });
+          button.addClass("smn-timestamp-url-btn");
+          button.setCssProps({
+            "background-color": this.settings.urlColor,
+            color: this.settings.urlTextColor,
+          });
           button.addEventListener("click", () => {
-            this.activateView(
+            void this.activateView(
               resolved.playableUrl,
               this.editor,
               resolved.isVaultFile ? resolved.vaultFile : null,
@@ -147,8 +181,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const div = el.createEl("div");
           const button = div.createEl("button");
           button.innerText = "🎙 " + raw;
-          button.setCssProps({ "background-color": this.settings.urlColor });
-          button.setCssProps({ color: this.settings.urlTextColor });
+          button.setCssProps({
+            "background-color": this.settings.urlColor,
+            color: this.settings.urlTextColor,
+          });
           button.addEventListener("click", () => {
             new PodcastModal(this.app, this, raw, this.editor!).open();
           });
@@ -160,12 +196,13 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const display = alias || raw.length > 55 ? (alias || raw).length > 55 ? (alias || raw).slice(0, 52) + "..." : (alias || raw) : raw;
           button.innerText = display;
           button.title = alias ? alias + "\n" + raw : raw;
-          button.style.cssText =
-            "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-          button.setCssProps({ "background-color": this.settings.urlColor });
-          button.setCssProps({ color: this.settings.urlTextColor });
+          button.addClass("smn-timestamp-url-btn");
+          button.setCssProps({
+            "background-color": this.settings.urlColor,
+            color: this.settings.urlTextColor,
+          });
           button.addEventListener("click", () => {
-            this.activateView(raw, this.editor);
+            void this.activateView(raw, this.editor);
           });
           div.appendChild(button);
         } else {
@@ -194,66 +231,50 @@ export default class SmartMediaNotesPlugin extends Plugin {
         }
 
         // Compact voice bar with duration display
-        const container = el.createEl("div");
-        container.style.cssText =
-          "display:inline-flex;align-items:center;gap:5px;padding:4px 10px;" +
-          "border-radius:14px;background:var(--background-modifier-hover);" +
-          "cursor:pointer;user-select:none;max-width:220px;min-width:80px;" +
-          "border:1px solid var(--background-modifier-border);";
+        const container = el.createEl("div", { cls: "smn-voice-bar" });
 
         // Play/pause button
-        const playBtn = container.createEl("span", { text: "\u25B6" });
-        playBtn.style.cssText =
-          "font-size:11px;flex-shrink:0;line-height:1;width:14px;text-align:center;";
+        const playBtn = container.createEl("span", {
+          text: "\u25B6",
+          cls: "smn-voice-bar-play",
+        });
 
         // Waveform bars (shorter, fewer, cleaner)
-        const waveContainer = container.createEl("div");
-        waveContainer.style.cssText =
-          "display:flex;align-items:center;gap:1.5px;flex:1;height:16px;overflow:hidden;";
+        const waveContainer = container.createEl("div", {
+          cls: "smn-voice-bar-wave",
+        });
 
         const barCount = 14;
         for (let i = 0; i < barCount; i++) {
           const h =
             2 + Math.abs(Math.sin(i * 0.85 + 1.5) * 10 + Math.sin(i * 1.7) * 3);
-          const bar = waveContainer.createEl("div");
-          bar.style.cssText =
-            `width:2px;height:${Math.round(h)}px;border-radius:1px;` +
-            "background:var(--interactive-accent);flex-shrink:0;transition:background 0.2s, opacity 0.2s;";
+          const bar = waveContainer.createEl("div", {
+            cls: "smn-voice-bar-wave-bar idle",
+          });
+          bar.setCssProps({ height: `${Math.round(h)}px` });
         }
 
         // Duration label (mm:ss)
-        const durationSpan = container.createEl("span");
-        durationSpan.style.cssText =
-          "font-size:10px;font-weight:500;color:var(--text-muted);" +
-          "font-variant-numeric:tabular-nums;flex-shrink:0;min-width:30px;text-align:center;";
+        const durationSpan = container.createEl("span", {
+          cls: "smn-voice-bar-duration",
+        });
         durationSpan.textContent = "--:--";
 
         // Current time label (shown during playback)
-        const currentSpan = container.createEl("span");
-        currentSpan.style.cssText =
-          "font-size:10px;font-weight:500;color:var(--text-accent);" +
-          "font-variant-numeric:tabular-nums;flex-shrink:0;min-width:30px;text-align:center;display:none;";
+        const currentSpan = container.createEl("span", {
+          cls: "smn-voice-bar-current is-hidden",
+        });
 
         // Delete button
         const deleteBtn = container.createEl("span", {
           text: "\u00D7",
           title: "Delete voice recording",
-        });
-        deleteBtn.style.cssText =
-          "font-size:12px;color:var(--text-muted);flex-shrink:0;cursor:pointer;" +
-          "padding:0 2px;line-height:1;opacity:0.5;transition:opacity 0.15s, color 0.15s;";
-        deleteBtn.addEventListener("mouseenter", () => {
-          deleteBtn.style.opacity = "1";
-          deleteBtn.style.color = "var(--text-error)";
-        });
-        deleteBtn.addEventListener("mouseleave", () => {
-          deleteBtn.style.opacity = "0.5";
-          deleteBtn.style.color = "var(--text-muted)";
+          cls: "smn-voice-bar-delete",
         });
         deleteBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           e.preventDefault();
-          await this.app.vault.delete(file);
+          await this.app.fileManager.trashFile(file);
           const noteFile = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
           if (noteFile) {
             try {
@@ -277,9 +298,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
         const audio = container.createEl("audio", {
           attr: {
             src: this.app.vault.getResourcePath(file),
-            style:
-              "position:absolute;opacity:0;pointer-events:none;width:1px;height:1px;",
           },
+          cls: "smn-hidden-audio",
         });
 
         let playing = false;
@@ -300,24 +320,23 @@ export default class SmartMediaNotesPlugin extends Plugin {
         audio.addEventListener("loadedmetadata", updateDuration);
         audio.addEventListener("durationchange", updateDuration);
         audio.addEventListener("canplay", updateDuration);
-        const durFallbackTimer = setTimeout(updateDuration, 500);
+        window.setTimeout(updateDuration, 500);
 
         audio.addEventListener("timeupdate", () => {
           if (audio.duration) {
             // Hide the static duration label during playback, show countdown
-            durationSpan.setCssProps({ display: "none" });
+            durationSpan.toggleClass("is-hidden", true);
             const remain = audio.duration - audio.currentTime;
             currentSpan.textContent = "-" + fmtSec(remain);
-            currentSpan.style.display = "inline";
+            currentSpan.toggleClass("is-hidden", false);
 
             const pct = audio.currentTime / audio.duration;
             const bars = waveContainer.querySelectorAll("div");
             const litCount = Math.round(pct * bars.length);
             bars.forEach((bar, i) => {
               const b = bar as HTMLElement;
-              b.style.background =
-                i < litCount ? "var(--text-accent)" : "var(--interactive-accent)";
-              b.style.opacity = i < litCount ? "1" : "0.35";
+              b.toggleClass("active", i < litCount);
+              b.toggleClass("idle", i >= litCount);
             });
           }
         });
@@ -325,12 +344,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
         audio.addEventListener("ended", () => {
           playing = false;
           playBtn.textContent = "\u25B6";
-          currentSpan.style.display = "none";
-          durationSpan.style.display = "";
+          currentSpan.toggleClass("is-hidden", true);
+          durationSpan.toggleClass("is-hidden", false);
           const bars = waveContainer.querySelectorAll("div");
           bars.forEach((bar) => {
-            (bar as HTMLElement).style.background = "var(--interactive-accent)";
-            (bar as HTMLElement).style.opacity = "0.35";
+            (bar as HTMLElement).removeClass("active");
+            (bar as HTMLElement).addClass("idle");
           });
         });
 
@@ -360,7 +379,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
         const selectedAlias = parsedSel.alias;
         const resolved = this.resolveMediaUrl(selectedUrl);
         if (resolved) {
-          this.activateView(
+          void this.activateView(
             resolved.playableUrl,
             editor,
             resolved.isVaultFile ? resolved.vaultFile : null,
@@ -381,19 +400,19 @@ export default class SmartMediaNotesPlugin extends Plugin {
                   "\n```\n",
               );
           this.editor = editor;
-          this.trackTimestamp(resolved.playableUrl, {
+          void this.trackTimestamp(resolved.playableUrl, {
             displayPath: resolved.displayPath,
             sourceLabel: resolved.isVaultFile ? "Vault" : resolved.isSystemFile ? "System" : "URL",
             title: resolved.displayPath.split("/").pop() || resolved.displayPath,
           });
-          this.refreshLibraryView();
+          void this.refreshLibraryView();
         } else if (this.isPodcastUrl(selectedUrl)) {
           this.editor = editor;
           new PodcastModal(this.app, this, selectedUrl, editor).open();
         } else if (/^https?:\/\//i.test(selectedUrl)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
-          this.activateView(selectedUrl, editor);
+          void this.activateView(selectedUrl, editor);
           this.settings.noteTitle
             ? editor.replaceSelection(
                 "\n" + this.settings.noteTitle +
@@ -656,7 +675,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
   stopDictationLoop(): void {
     this.dictationMode = false;
     if (this.dictationLoopTimer) {
-      clearInterval(this.dictationLoopTimer);
+      window.clearInterval(this.dictationLoopTimer);
       this.dictationLoopTimer = null;
     }
   }
@@ -683,9 +702,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
     try {
       const normalized = systemPath.replace(/\\/g, "/");
       const fileUrl = "file:///" + encodeURI(normalized).replace(/#/g, "%23");
-      const response = await fetch(fileUrl);
-      if (response.ok) {
-        const blob = await response.blob();
+      const response = await requestUrl({
+        url: fileUrl,
+        method: "GET",
+      });
+      if (response.status >= 200 && response.status < 300) {
+        const blob = new Blob([response.arrayBuffer]);
         return URL.createObjectURL(blob);
       }
     } catch (_) { /* fall through */ }
@@ -713,7 +735,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
   // ---- Subtitle management ----
 
   /** Generate a stable key for subtitle storage that won't change between sessions */
-  getStableSubtitleKey(url: string, vaultFile?: any): string {
+  getStableSubtitleKey(url: string, vaultFile?: TFile | null): string {
     // For vault files, use the vault path (stable across sessions)
     if (vaultFile?.path) {
       return "vault://" + vaultFile.path;
@@ -733,7 +755,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return url;
   }
 
-  async getSubtitlesForUrl(url: string, vaultFile?: any): Promise<SubtitleCue[]> {
+  async getSubtitlesForUrl(
+    url: string,
+    vaultFile?: TFile | null,
+  ): Promise<SubtitleCue[]> {
     const stableKey = this.getStableSubtitleKey(url, vaultFile);
 
     // Try lookup by stable key first
@@ -818,19 +843,19 @@ export default class SmartMediaNotesPlugin extends Plugin {
   }
 
   // ---- Playlist ----
-  buildPlaylist(vaultFile: any): { files: any[]; currentIndex: number } | null {
+  buildPlaylist(vaultFile: TFile): { files: TFile[]; currentIndex: number } | null {
     if (!vaultFile?.parent) return null;
     const siblings = vaultFile.parent.children
       .filter(
-        (f: any) =>
-          f.extension &&
+        (f): f is TFile =>
+          f instanceof TFile &&
           MEDIA_EXTENSIONS.includes(f.extension.toLowerCase()),
       )
-      .sort((a: any, b: any) =>
+      .sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { numeric: true }),
       );
     if (siblings.length <= 1) return null;
-    const index = siblings.findIndex((f: any) => f.path === vaultFile.path);
+    const index = siblings.findIndex((f) => f.path === vaultFile.path);
     return { files: siblings, currentIndex: index >= 0 ? index : 0 };
   }
 
@@ -887,7 +912,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   stringifyRssSubscriptions(): string {
     return (this.settings.rssSubscriptions || [])
-      .map((feed: any) => {
+      .map((feed) => {
         if (typeof feed === "string") return feed;
         return feed.title ? `${feed.title} | ${feed.url}` : feed.url;
       })
@@ -896,15 +921,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   async fetchPodcastEpisodes(
     feedUrl: string,
-  ): Promise<{ feedTitle: string; episodes: any[]; error: string | null }> {
+  ): Promise<{ feedTitle: string; episodes: PodcastEpisode[]; error: string | null }> {
     try {
-      const response = await fetch(feedUrl);
-      const text = await response.text();
+      const response = await requestUrl(feedUrl);
+      const text = response.text;
       const feedTitleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
       const feedTitle = feedTitleMatch
         ? feedTitleMatch[1].replace(/<[^>]+>/g, "").trim()
         : "Podcast";
-      const episodes: any[] = [];
+      const episodes: PodcastEpisode[] = [];
       let idx = 0;
       while (idx < text.length) {
         const itemStart = text.indexOf("<item", idx);
@@ -1001,14 +1026,14 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return normalized;
   }
 
-  getMediaFilesInFolder(folderPath: string): any[] {
+  getMediaFilesInFolder(folderPath: string): MediaFileEntry[] {
     if (this.isSystemFolderPath(folderPath)) {
       try {
         const fs = require("fs");
         const path = require("path");
-        const found: any[] = [];
+        const found: MediaFileEntry[] = [];
         const walk = (dir: string) => {
-          let entries: any[];
+          let entries: Array<{ name: string; isDirectory(): boolean }>;
           try {
             entries = fs.readdirSync(dir, { withFileTypes: true });
           } catch (_) {
@@ -1034,7 +1059,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           }
         };
         walk(folderPath);
-        return found.sort((a: any, b: any) =>
+        return found.sort((a, b) =>
           a.path.localeCompare(b.path, undefined, { numeric: true }),
         );
       } catch (_) {
@@ -1058,7 +1083,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
         playableUrl: this.app.vault.getResourcePath(file),
         vaultFile: file,
       }))
-      .sort((a: any, b: any) =>
+      .sort((a, b) =>
         a.path.localeCompare(b.path, undefined, { numeric: true }),
       );
   }
@@ -1074,8 +1099,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     if (markdownView?.editor) return markdownView.editor;
     const leaves = this.app.workspace.getLeavesOfType("markdown");
     for (const leaf of leaves) {
-      const view = leaf.view as any;
-      if (view?.editor) return view.editor;
+      if (leaf.view instanceof MarkdownView) return leaf.view.editor;
     }
     return this.editor;
   }
@@ -1108,7 +1132,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
   async openLibraryMedia(
     url: string,
-    vaultFile: any,
+    vaultFile: TFile | null,
     meta: {
       title?: string;
       description?: string;
@@ -1130,7 +1154,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
       vaultFile || null,
     );
     // Track this media in the saved media collection
-    this.trackTimestamp(url, {
+    await this.trackTimestamp(url, {
       displayPath: meta.displayPath || url,
       sourceLabel: meta.sourceLabel || "",
       title: meta.title || meta.displayPath || url,
@@ -1348,7 +1372,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
   async activateView(
     url: string,
     editor: Editor | null,
-    vaultFile: any = null,
+    vaultFile: TFile | null = null,
   ): Promise<void> {
     let resolvedUrl = url;
     let systemPath: string | null = null;
@@ -1369,22 +1393,21 @@ export default class SmartMediaNotesPlugin extends Plugin {
     const videoLeaf = await this.getOrCreateVideoLeaf();
     this.app.workspace.revealLeaf(videoLeaf);
 
-    const _plugin = this;
     const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
     for (const leaf of leaves) {
       if (leaf.view instanceof VideoView) {
-        const subs = await _plugin.getSubtitlesForUrl(url, vaultFile);
+        const subs = await this.getSubtitlesForUrl(url, vaultFile);
         // 检测音频：使用原始 URL（本地文件 blob URL 无法通过扩展名检测）
         const audio = isAudioFile(url) ||
           (systemPath ? isAudioFile(systemPath) : false) ||
           (vaultFile?.extension
             ? !getVideoFormats().includes(vaultFile.extension.toLowerCase())
             : false);
-        leaf.setEphemeralState({
+        const state: VideoEphemeralState = {
           url: resolvedUrl,
-          setupPlayer: (player: any, setPlaying: (p: boolean) => void) => {
-            _plugin.player = player;
-            _plugin.setPlaying = setPlaying;
+          setupPlayer: (player, setPlaying) => {
+            this.player = player;
+            this.setPlaying = setPlaying;
           },
           setupError: (err: string) => {
             if (editor) {
@@ -1395,37 +1418,38 @@ export default class SmartMediaNotesPlugin extends Plugin {
             }
           },
           saveTimeOnUnload: async () => {
-            if (_plugin.player) {
-              _plugin.settings.urlStartTimeMap.set(
+            if (this.player) {
+              this.settings.urlStartTimeMap.set(
                 url,
-                Number(_plugin.player.getCurrentTime().toFixed(0)),
+                Number(this.player.getCurrentTime().toFixed(0)),
               );
             }
-            await _plugin.saveSettings();
+            await this.saveSettings();
           },
           start:
-            ~~(_plugin.settings.urlStartTimeMap.get(url) || 0),
+            ~~(this.settings.urlStartTimeMap.get(url) || 0),
           subtitles: subs,
-          onSubtitleChange: _plugin.setCurrentSubtitle.bind(_plugin),
+          onSubtitleChange: this.setCurrentSubtitle.bind(this),
           showSubtitleOverlay:
-            _plugin.settings.showSubtitleOverlay !== false,
+            this.settings.showSubtitleOverlay !== false,
           showSubtitleBrowser:
-            _plugin.settings.showSubtitleBrowser !== false,
+            this.settings.showSubtitleBrowser !== false,
           subtitleOverlayFontSize:
-            _plugin.settings.subtitleOverlayFontSize || "large",
-          dictationMode: _plugin.dictationMode,
-          dictationLoopCount: parseFloat(_plugin.settings.dictationLoopCount) || 0,
-          dictationLoopGap: parseFloat(_plugin.settings.dictationLoopGap) || 0.5,
+            this.settings.subtitleOverlayFontSize || "large",
+          dictationMode: this.dictationMode,
+          dictationLoopCount: parseFloat(this.settings.dictationLoopCount) || 0,
+          dictationLoopGap: parseFloat(this.settings.dictationLoopGap) || 0.5,
           playlist: vaultFile
-            ? _plugin.buildPlaylist(vaultFile)
+            ? this.buildPlaylist(vaultFile)
             : null,
-          onNavigatePlaylist: async (file: any) => {
-            const newUrl = _plugin.app.vault.getResourcePath(file);
-            await _plugin.activateView(newUrl, _plugin.editor, file);
+          onNavigatePlaylist: async (file) => {
+            const newUrl = this.app.vault.getResourcePath(file);
+            await this.activateView(newUrl, this.editor, file);
           },
           isAudio: audio,
-        });
-        await _plugin.saveSettings();
+        };
+        leaf.setEphemeralState(state);
+        await this.saveSettings();
       }
     }
   }
@@ -1437,7 +1461,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
   // 每次启动时 subtitleLibrary 从空开始，访问字幕时按需从磁盘文件加载。
 
   async loadSettings(): Promise<void> {
-    const data = await this.loadData();
+    const data = (await this.loadData()) as PersistedSettingsData | null;
     if (data) {
       // 如果 data.json 里残留了旧版 subtitleLibrary，清理掉
       if (data.subtitleLibrary && Object.keys(data.subtitleLibrary).length > 0) {
@@ -1508,7 +1532,7 @@ class VaultMediaModal extends FuzzySuggestModal<TFile> {
 
   onChooseItem(file: TFile): void {
     const resourceUrl = this.app.vault.getResourcePath(file);
-    this.plugin.activateView(resourceUrl, this.plugin.editor, file);
+    void this.plugin.activateView(resourceUrl, this.plugin.editor, file);
   }
 }
 
@@ -1516,7 +1540,7 @@ class PodcastModal extends Modal {
   plugin: SmartMediaNotesPlugin;
   feedUrl: string;
   editor: Editor | null;
-  episodes: any[] = [];
+  episodes: PodcastEpisode[] = [];
   feedTitle: string = "";
   error: string | null = null;
 
@@ -1535,8 +1559,7 @@ class PodcastModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.style.cssText =
-      "padding:0;min-width:400px;max-height:520px;display:flex;flex-direction:column;";
+    contentEl.addClass("smn-podcast-modal");
     const loadingDiv = contentEl.createEl("div", {
       style: { padding: "24px", textAlign: "center" },
     });
@@ -1557,21 +1580,21 @@ class PodcastModal extends Modal {
         wordBreak: "break-all",
       },
     });
-    this.loadFeed();
+    void this.loadFeed();
   }
 
   async loadFeed(): Promise<void> {
     const { contentEl } = this;
     try {
-      const response = await fetch(this.feedUrl);
-      const text = await response.text();
+      const response = await requestUrl(this.feedUrl);
+      const text = response.text;
       const feedTitleMatch = text.match(
         /<title[^>]*>([\s\S]*?)<\/title>/i,
       );
       this.feedTitle = feedTitleMatch
         ? feedTitleMatch[1].replace(/<[^>]+>/g, "").trim()
         : "Podcast";
-      const episodes: any[] = [];
+      const episodes: PodcastEpisode[] = [];
       let idx = 0;
       while (idx < text.length) {
         const itemStart = text.indexOf("<item", idx);
@@ -1670,8 +1693,7 @@ class PodcastModal extends Modal {
         },
       });
       const retryBtn = errDiv.createEl("button", { text: "Retry" });
-      retryBtn.style.cssText =
-        "padding:6px 16px;border-radius:6px;cursor:pointer;background:var(--interactive-accent);color:var(--text-on-accent);border:none;";
+      retryBtn.addClass("smn-podcast-error-retry");
       retryBtn.addEventListener("click", () => {
         this.error = null;
         this.onOpen();
@@ -1705,6 +1727,7 @@ class PodcastModal extends Modal {
     this.episodes.forEach((ep, i) => {
       const num = this.episodes.length - i;
       const row = list.createEl("div", {
+        cls: "smn-podcast-ep-row",
         style: {
           display: "flex",
           alignItems: "flex-start",
@@ -1714,12 +1737,6 @@ class PodcastModal extends Modal {
           borderBottom: "1px solid var(--background-modifier-border)",
           transition: "background 0.1s",
         },
-      });
-      row.addEventListener("mouseenter", () => {
-        row.style.backgroundColor = "var(--background-modifier-hover)";
-      });
-      row.addEventListener("mouseleave", () => {
-        row.style.backgroundColor = "";
       });
       const badge = row.createEl("div", {
         text: String(num),
@@ -1800,7 +1817,7 @@ class PodcastModal extends Modal {
           "\n";
         this.editor?.replaceSelection(note);
         await this.plugin.activateView(ep.url, this.editor);
-        this.plugin.trackTimestamp(ep.url, {
+        await this.plugin.trackTimestamp(ep.url, {
           title: ep.title,
           sourceLabel: this.feedTitle,
           displayPath: ep.url,

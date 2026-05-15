@@ -10,18 +10,23 @@
 
 import React, { useRef, useState, useEffect } from "react";
 import ReactPlayer from "react-player";
+import type { TFile } from "obsidian";
 import { SubtitleCue, findCueAtTime, formatSecondsAsTimestamp, isAudioFile } from "../utils";
+
+interface PlayerHandle {
+  seekTo(seconds: number): void;
+}
 
 // ---- 类型 ----
 
 export interface PlaylistInfo {
-  files: any[];
+  files: TFile[];
   currentIndex: number;
 }
 
 interface VideoContainerProps {
   url: string;
-  setupPlayer: (player: any, setPlaying: (p: boolean) => void) => void;
+  setupPlayer: (player: PlayerHandle, setPlaying: (p: boolean) => void) => void;
   start?: number;
   setupError: (err: string) => void;
   subtitles?: SubtitleCue[];
@@ -30,7 +35,7 @@ interface VideoContainerProps {
   showSubtitleBrowser?: boolean;
   subtitleOverlayFontSize?: string; // small / medium / large / xlarge
   playlist?: PlaylistInfo | null;
-  onNavigatePlaylist?: (file: any) => void;
+  onNavigatePlaylist?: (file: TFile) => void;
   // 由外部指定是否为音频（本地文件的 blob URL 无法通过扩展名检测）
   isAudio?: boolean;
   // 听写模式
@@ -58,7 +63,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   dictationLoopCount = 0,
   dictationLoopGap = 0.5,
 }) => {
-  const playerRef = useRef<any>();
+  const playerRef = useRef<ReactPlayer | null>(null);
   const subtitleListRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
@@ -89,8 +94,8 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   useEffect(() => {
     setPlaying(false);
-    const timer = setTimeout(() => setPlaying(true), 400);
-    return () => clearTimeout(timer);
+    const timer = window.setTimeout(() => setPlaying(true), 400);
+    return () => window.clearTimeout(timer);
   }, [url]);
 
   useEffect(() => {
@@ -131,7 +136,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
         } else {
           // 插入间隔暂停
           loopPauseRef.current = true;
-          setTimeout(() => {
+          window.setTimeout(() => {
             if (playerRef.current) {
               playerRef.current.seekTo(startTime);
             }
@@ -191,6 +196,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             key={idx}
             data-active={isActive ? "true" : "false"}
             onClick={() => handleSubtitleClick(cue)}
+            className={isActive ? "smn-subtitle-row is-active" : "smn-subtitle-row"}
             style={{
               padding: "5px 10px",
               cursor: "pointer",
@@ -200,12 +206,6 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
               fontSize: "12px",
               lineHeight: "1.4",
               transition: "background-color 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive) e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive) e.currentTarget.style.backgroundColor = "transparent";
             }}
           >
             <span
@@ -244,9 +244,11 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           onReady={onReady}
           onProgress={handleProgress}
           progressInterval={200}
-          onError={(err: any) =>
+          onError={(err: unknown) =>
             setupError(
-              err?.message ||
+              err instanceof Error
+                ? err.message
+                :
                 "Video is unplayable due to privacy settings, streaming permissions, etc.",
             )
           }

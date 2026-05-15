@@ -1,16 +1,29 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { Editor, ItemView, MarkdownView, TFile, WorkspaceLeaf } from "obsidian";
 import React from "react";
 import { createRoot, Root } from "react-dom/client";
-import ReactDOM from "react-dom";
 import VideoContainer, { PlaylistInfo } from "./VideoContainer";
-import { SubtitleCue } from "../utils";
+import { MediaFileEntry, PodcastEpisode, SubtitleCue } from "../utils";
+import type SmartMediaNotesPlugin from "../main";
+
+interface PlayerHandle {
+  seekTo(seconds: number): void;
+  getCurrentTime(): number;
+  props?: {
+    playing?: boolean;
+  };
+}
+
+interface RssSubscriptionEntry {
+  title: string;
+  url: string;
+}
 
 export const VIDEO_VIEW = "video-view";
 export const LIBRARY_VIEW = "smart-media-library-view";
 
 interface EphemeralState {
   url: string;
-  setupPlayer: (player: any, setPlaying: (p: boolean) => void) => void;
+  setupPlayer: (player: PlayerHandle, setPlaying: (p: boolean) => void) => void;
   setupError: (err: string) => void;
   saveTimeOnUnload: () => Promise<void>;
   start: number;
@@ -23,13 +36,13 @@ interface EphemeralState {
   dictationLoopCount?: number;
   dictationLoopGap?: number;
   playlist?: PlaylistInfo | null;
-  onNavigatePlaylist?: (file: any) => void;
+  onNavigatePlaylist?: (file: TFile) => Promise<void>;
   isAudio?: boolean;
 }
 
 export class VideoView extends ItemView {
   root: Root;
-  saveTimeOnUnload: () => Promise<void> = async () => {};
+  saveTimeOnUnload: () => Promise<void> = () => Promise.resolve();
   currentEphemeralState?: EphemeralState;
 
   constructor(leaf: WorkspaceLeaf) {
@@ -76,14 +89,13 @@ export class VideoView extends ItemView {
   async onClose(): Promise<void> {
     if (this.saveTimeOnUnload) await this.saveTimeOnUnload();
     this.root.unmount();
-    ReactDOM.unmountComponentAtNode(this.containerEl.children[1]);
   }
 }
 
 export class MediaLibraryView extends ItemView {
-  plugin: any;
+  plugin: SmartMediaNotesPlugin;
 
-  constructor(leaf: WorkspaceLeaf, plugin: any) {
+  constructor(leaf: WorkspaceLeaf, plugin: SmartMediaNotesPlugin) {
     super(leaf);
     this.plugin = plugin;
   }
@@ -151,13 +163,12 @@ export class MediaLibraryView extends ItemView {
       lastOpened: number;
     }>;
 
-    const section = parent.createEl("details");
-    section.style.cssText = "padding:12px 12px 0";
-    const summary = section.createEl("summary");
-    summary.style.cssText =
-      "font-size:12px;font-weight:600;color:var(--text-normal);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
-      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    const section = parent.createEl("details", {
+      cls: "smn-library-section-block",
+    });
+    const summary = section.createEl("summary", {
+      cls: "smn-library-section-summary",
+    });
     summary.createEl("span", {
       text: " Saved Media",
       style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
@@ -186,44 +197,28 @@ export class MediaLibraryView extends ItemView {
 
     // Tag filter bar — integrated into the summary row
     if (allTags.length) {
-      const filterBar = section.createEl("div");
-      filterBar.style.cssText =
-        "display:flex;flex-wrap:wrap;margin:8px 0 14px;align-items:center";
+      const filterBar = section.createEl("div", {
+        cls: "smn-library-filter-bar",
+      });
       const allPill = filterBar.createEl("span", { text: "All" });
-      allPill.style.cssText =
-        "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
-        "border-radius:6px;cursor:pointer;" +
-        "font-weight:" + (hasFilter ? "400" : "600") + ";" +
-        "color:" + (hasFilter ? "var(--text-muted)" : "var(--text-on-accent)") + ";" +
-        "background:" + (hasFilter ? "transparent" : "var(--interactive-accent)") + ";" +
-        "border:1px solid " + (hasFilter ? "var(--background-modifier-border)" : "var(--interactive-accent)");
+      allPill.addClass("smn-library-filter-pill");
+      allPill.toggleClass("is-active", !hasFilter);
       allPill.addEventListener("click", () => {
         this._savedMediaFilterTags = [];
-        this.render();
+        void this.render();
       });
       allTags.forEach((tag) => {
         const isActive = activeFilterTags.includes(tag);
         const pill = filterBar.createEl("span", { text: tag });
-        pill.style.cssText =
-          "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
-          "border-radius:6px;cursor:pointer;" +
-          "font-weight:" + (isActive ? "600" : "400") + ";" +
-          "color:" + (isActive ? "var(--text-on-accent)" : "var(--text-muted)") + ";" +
-          "background:" + (isActive ? "var(--interactive-accent)" : "transparent") + ";" +
-          "border:1px solid " + (isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)");
+        pill.addClass("smn-library-filter-pill");
+        pill.toggleClass("is-active", isActive);
         pill.addEventListener("click", () => {
           if (activeFilterTags.includes(tag)) {
             this._savedMediaFilterTags = activeFilterTags.filter(t => t !== tag);
           } else {
             this._savedMediaFilterTags = [...activeFilterTags, tag];
           }
-          this.render();
-        });
-        pill.addEventListener("mouseenter", () => {
-          if (!isActive) pill.style.borderColor = "var(--text-muted)";
-        });
-        pill.addEventListener("mouseleave", () => {
-          if (!isActive) pill.style.borderColor = "var(--background-modifier-border)";
+          void this.render();
         });
       });
     }    // Sort newest first
@@ -251,16 +246,8 @@ export class MediaLibraryView extends ItemView {
     }
 
     filtered.forEach((entry) => {
-      const row = section.createEl("div");
-      row.style.cssText =
-        "margin-bottom:10px;padding:12px 14px;border:1px solid var(--background-modifier-border);" +
-        "border-radius:10px;background:var(--background-secondary);cursor:pointer;" +
-        "transition:background 0.15s;";
-      row.addEventListener("mouseenter", () => {
-        row.style.background = "var(--background-modifier-hover)";
-      });
-      row.addEventListener("mouseleave", () => {
-        row.style.background = "var(--background-secondary)";
+      const row = section.createEl("div", {
+        cls: "smn-saved-entry",
       });
 
       // Title line
@@ -290,29 +277,19 @@ export class MediaLibraryView extends ItemView {
       const removeBtn = titleRow.createEl("span", {
         text: "\u2715",
         title: "Remove from collection",
-      });
-      removeBtn.style.cssText =
-        "font-size:10px;color:var(--text-faint);cursor:pointer;padding:2px;opacity:0.4;" +
-        "transition:opacity 0.15s, color 0.15s;";
-      removeBtn.addEventListener("mouseenter", () => {
-        removeBtn.style.opacity = "1";
-        removeBtn.style.color = "var(--text-error)";
-      });
-      removeBtn.addEventListener("mouseleave", () => {
-        removeBtn.style.opacity = "0.4";
-        removeBtn.style.color = "var(--text-faint)";
+        cls: "smn-saved-entry-remove",
       });
       removeBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const coll = this.plugin.settings.timestampCollection || [];
         const pos = coll.findIndex(
-          (e: any) => e.url === entry.url && e.notePath === entry.notePath
+          (item) => item.url === entry.url && item.notePath === entry.notePath
         );
         if (pos >= 0) {
           coll.splice(pos, 1);
           this.plugin.settings.timestampCollection = coll;
-          this.plugin.saveSettings();
-          this.render();
+          void this.plugin.saveSettings();
+          void this.render();
         }
       });
 
@@ -342,9 +319,8 @@ export class MediaLibraryView extends ItemView {
         noteLink.addEventListener("click", (e) => {
           e.stopPropagation();
           const file = this.app.vault.getAbstractFileByPath(entry.notePath);
-          if (file) {
-            // @ts-ignore
-            this.app.workspace.getLeaf().openFile(file);
+          if (file instanceof TFile) {
+            void this.app.workspace.getLeaf().openFile(file);
           }
         });
         infoLine.createEl("span", { text: "·", style: { opacity: "0.3", flexShrink: "0" } });
@@ -360,18 +336,17 @@ export class MediaLibraryView extends ItemView {
         style: { display: "flex", flexWrap: "wrap", alignItems: "center" },
       });
       entry.tags.forEach((tag) => {
-        const pill = tagRow.createEl("span", { text: tag });
-        pill.style.cssText =
-          "font-size:10px;padding:3px 10px;margin-right:4px;" +
-          "border-radius:8px;background:var(--interactive-accent);" +
-          "color:var(--text-on-accent);cursor:pointer";
+        const pill = tagRow.createEl("span", {
+          text: tag,
+          cls: "smn-tag-pill",
+        });
         pill.addEventListener("click", (e) => {
           e.stopPropagation();
           const current = (this._savedMediaFilterTags || []) as string[];
           this._savedMediaFilterTags = current.includes(tag)
             ? current.filter(t => t !== tag)
             : [...current, tag];
-          this.render();
+          void this.render();
         });
       });
 
@@ -406,12 +381,12 @@ export class MediaLibraryView extends ItemView {
               }
             }
           } catch (_) { /* ignore */ }
-          // @ts-ignore
-          const leaf = this.app.workspace.getLeaf();
+          const leaf = this.app.workspace.getLeaf() ?? this.app.workspace.getMostRecentLeaf();
+          if (!leaf) return;
           await leaf.openFile(noteFile);
           // Set cursor after view is ready
-          const view = leaf.view as any;
-          if (view?.editor) {
+          const view = leaf.view;
+          if (view instanceof MarkdownView) {
             view.editor.setCursor({ line: cursorLine, ch: 0 });
             view.editor.scrollIntoView({ from: { line: cursorLine, ch: 0 }, to: { line: cursorLine, ch: 0 } }, true);
           }
@@ -426,18 +401,17 @@ export class MediaLibraryView extends ItemView {
   }
   private renderRssSection(parent: HTMLElement): void {
     const feeds = (this.plugin.settings.rssSubscriptions || [])
-      .map((feed: any) =>
+      .map((feed): RssSubscriptionEntry =>
         typeof feed === "string" ? { title: "", url: feed } : feed,
       )
-      .filter((feed: any) => feed && feed.url);
+      .filter((feed) => Boolean(feed?.url));
 
-    const section = parent.createEl("details");
-    section.style.cssText = "padding:16px 12px 0;border-top:1px solid var(--background-modifier-border)";
-    const summary = section.createEl("summary");
-    summary.style.cssText =
-      "font-size:12px;font-weight:600;color:var(--text-normal);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
-      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    const section = parent.createEl("details", {
+      cls: "smn-library-section-block has-top-border",
+    });
+    const summary = section.createEl("summary", {
+      cls: "smn-library-section-summary",
+    });
     summary.createEl("span", {
       text: " RSS Subscriptions",
       style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
@@ -468,25 +442,24 @@ export class MediaLibraryView extends ItemView {
         },
       });
       empty.addEventListener("click", () => {
-        // @ts-ignore
-        this.app.setting.open();
-        // @ts-ignore
-        this.app.setting.openTabById(this.plugin.manifest.id);
+        const setting = (this.app as App & {
+          setting?: { open(): void; openTabById(id: string): void };
+        }).setting;
+        setting?.open();
+        setting?.openTabById(this.plugin.manifest.id);
       });
       return;
     }
 
     const rssList = section.createEl("div", { style: { maxHeight: "300px", overflowY: "auto" } });
-    feeds.forEach((feed: any) => {
+    feeds.forEach((feed) => {
       const details = rssList.createEl("details", {
-        cls: "smart-media-library-details",
+        cls: "smn-library-details",
       });
-      details.style.cssText =
-        "margin-bottom:10px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary);overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,0.04);";
 
-      const summary = details.createEl("summary");
-      summary.style.cssText =
-        "list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;font-weight:600;";
+      const summary = details.createEl("summary", {
+        cls: "smn-library-summary",
+      });
 
       const left = summary.createEl("div", {
         style: { minWidth: "0", flex: "1" },
@@ -556,23 +529,16 @@ export class MediaLibraryView extends ItemView {
           });
           return;
         }
-        result.episodes.forEach((ep: any, index: number) => {
+        result.episodes.forEach((ep: PodcastEpisode, index: number) => {
           const row = body.createEl("div", {
+            cls: "smn-episode-row",
             style: {
-              padding: "10px 14px",
               borderTop:
                 index === 0
                   ? "none"
                   : "1px solid var(--background-modifier-border)",
-              cursor: "pointer",
             },
           });
-          row.addEventListener(
-            "mouseenter",
-            () =>
-              (row.style.background = "var(--background-modifier-hover)"),
-          );
-          row.addEventListener("mouseleave", () => (row.style.background = ""));
           row.createEl("div", {
             text: ep.title || "Untitled",
             style: {
@@ -632,17 +598,16 @@ export class MediaLibraryView extends ItemView {
   private renderFolderSection(parent: HTMLElement): void {
     const folders = (this.plugin.settings.mediaFolders || [])
       .filter(
-        (folder: any) => typeof folder === "string" && folder.trim().length,
+        (folder): folder is string => typeof folder === "string" && folder.trim().length > 0,
       )
       .map((folder: string) => folder.trim());
 
-    const section = parent.createEl("details");
-    section.style.cssText = "padding:16px 12px 0;border-top:1px solid var(--background-modifier-border)";
-    const summary = section.createEl("summary");
-    summary.style.cssText =
-      "font-size:12px;font-weight:600;color:var(--text-normal);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
-      "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
+    const section = parent.createEl("details", {
+      cls: "smn-library-section-block has-top-border",
+    });
+    const summary = section.createEl("summary", {
+      cls: "smn-library-section-summary",
+    });
     summary.createEl("span", {
       text: " Media Folders",
       style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
@@ -665,23 +630,24 @@ export class MediaLibraryView extends ItemView {
         },
       });
       empty.addEventListener("click", () => {
-        // @ts-ignore
-        this.app.setting.open();
-        // @ts-ignore
-        this.app.setting.openTabById(this.plugin.manifest.id);
+        const setting = (this.app as App & {
+          setting?: { open(): void; openTabById(id: string): void };
+        }).setting;
+        setting?.open();
+        setting?.openTabById(this.plugin.manifest.id);
       });
       return;
     }
 
     const foldList = section.createEl("div", { style: { maxHeight: "300px", overflowY: "auto" } });
     folders.forEach((folderPath: string) => {
-      const details = foldList.createEl("details");
-      details.style.cssText =
-        "margin-bottom:10px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary);overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,0.04);";
+      const details = foldList.createEl("details", {
+        cls: "smn-library-details",
+      });
 
-      const summary = details.createEl("summary");
-      summary.style.cssText =
-        "list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;font-weight:600;";
+      const summary = details.createEl("summary", {
+        cls: "smn-library-summary",
+      });
 
       const left = summary.createEl("div", {
         style: { minWidth: "0", flex: "1" },
@@ -717,22 +683,16 @@ export class MediaLibraryView extends ItemView {
         return;
       }
 
-      files.forEach((file: any, index: number) => {
+      files.forEach((file: MediaFileEntry, index: number) => {
         const row = body.createEl("div", {
+          cls: "smn-folder-row",
           style: {
-            padding: "10px 14px",
             borderTop:
               index === 0
                 ? "none"
                 : "1px solid var(--background-modifier-border)",
-            cursor: "pointer",
           },
         });
-        row.addEventListener(
-          "mouseenter",
-          () => (row.style.background = "var(--background-modifier-hover)"),
-        );
-        row.addEventListener("mouseleave", () => (row.style.background = ""));
         row.createEl("div", {
           text: file.basename,
           style: {

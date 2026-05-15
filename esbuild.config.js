@@ -3,13 +3,16 @@ const esbuild = require("esbuild");
 const production = process.argv.includes("production");
 
 const config = {
+  absWorkingDir: __dirname,
   entryPoints: ["src/main.ts"],
   bundle: true,
   outfile: "main.js",
   external: ["obsidian"],
   format: "cjs",
+  platform: "browser",
   target: "es2018",
   logLevel: "info",
+  tsconfig: "tsconfig.json",
   sourcemap: production ? false : "inline",
   treeShaking: true,
   define: {
