@@ -1,4 +1,4 @@
-﻿import {
+import {
   App,
   Editor,
   FuzzySuggestModal,
@@ -668,15 +668,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
   // ---- System file resolution ----
   async resolveSystemFilePath(systemPath: string): Promise<string | null> {
     try {
-      const normalized = systemPath.replace(/\\/g, "/");
-      const fileUrl = "file:///" + encodeURI(normalized).replace(/#/g, "%23");
-      const response = await fetch(fileUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        return URL.createObjectURL(blob);
-      }
-    } catch (_) { /* fall through */ }
-    try {
       const fs = require("fs");
       const path = require("path");
       const buffer = fs.readFileSync(systemPath);
@@ -692,6 +683,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
       const mime = mimeMap[ext] || "application/octet-stream";
       const blob = new Blob([buffer], { type: mime });
       return URL.createObjectURL(blob);
+    } catch (_) { /* fs not available */ }
+    try {
+      const normalized = systemPath.replace(/\\/g, "/");
+      const fileUrl = "file:///" + encodeURI(normalized).replace(/#/g, "%23");
+      const response = await fetch(fileUrl);
+      if (response.ok) {
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+      }
     } catch (_) { /* fall through */ }
     return null;
   }
@@ -1469,11 +1469,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
         mediaFolders: data.mediaFolders || [],
       };
     } else {
-      this.settings = Object.assign(
-        {},
-        DEFAULT_SETTINGS,
-        await this.loadData(),
-      ) as SmartMediaNotesSettings;
+      this.settings = {
+        ...(DEFAULT_SETTINGS as SmartMediaNotesSettings),
+        urlStartTimeMap: new Map<string, number>(),
+      };
     }
     // Apply user-defined media format lists to the shared module-level lists
     setMediaFormats(
