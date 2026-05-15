@@ -193,20 +193,26 @@ export function isPlayableMedia(url: string): boolean {
 /** Parse a timestamp-url block source into alias and URL.
  *  Supported formats:
  *    name | https://...        — single-line pipe (preferred)
+ *    [title](link)             — markdown link (YouTube paste, etc.)
  *    name\nhttps://...         — two-line (legacy)
  *    https://...               — URL only
  *    /path/to/file.mp4         — file path
  */
 export function parseTimestampUrlBlock(source: string): { alias?: string; url: string } {
   const s = source.trim();
-  // Format 1: name | link  (pipe-separated single line)
+  // Format 1: markdown link [title](url)
+  const mdMatch = s.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+  if (mdMatch) {
+    return { alias: mdMatch[1].trim(), url: mdMatch[2].trim() };
+  }
+  // Format 2: name | link  (pipe-separated single line)
   const pipeIdx = s.indexOf("|");
   if (pipeIdx > 0) {
     const alias = s.substring(0, pipeIdx).trim();
     const link = s.substring(pipeIdx + 1).trim();
     if (link) return { alias: alias || undefined, url: link };
   }
-  // Format 2: name\nlink (two-line legacy)
+  // Format 3: name\nlink (two-line legacy)
   const lines = s.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length >= 2) {
     const last = lines[lines.length - 1];
@@ -217,7 +223,7 @@ export function parseTimestampUrlBlock(source: string): { alias?: string; url: s
     }
     // If last line isn't a URL/path, treat entire source as URL
   }
-  // Format 3: URL / path only
+  // Format 4: URL / path only
   return { url: s };
 }
 
