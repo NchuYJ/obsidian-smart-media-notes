@@ -133,12 +133,7 @@ export class MediaLibraryView extends ItemView {
         zIndex: "1",
       },
     });
-    header.createEl("div", {
-      text: "Smart Media Library",
-      style: { fontWeight: "700", fontSize: "16px", letterSpacing: "0.01em" },
-    });
 
-    
     this.renderSavedMediaSection(wrap);
     this.renderRssSection(wrap);
     this.renderFolderSection(wrap);
@@ -270,7 +265,7 @@ export class MediaLibraryView extends ItemView {
     filtered.forEach((entry) => {
       const row = section.createEl("div");
       row.style.cssText =
-        "margin-bottom:6px;padding:10px 12px;border:1px solid var(--background-modifier-border);" +
+        "margin-bottom:10px;padding:12px 14px;border:1px solid var(--background-modifier-border);" +
         "border-radius:10px;background:var(--background-secondary);cursor:pointer;" +
         "transition:background 0.15s;";
       row.addEventListener("mouseenter", () => {
@@ -292,13 +287,27 @@ export class MediaLibraryView extends ItemView {
       const titleEl = titleRow.createEl("span", {
         text: entry.title || entry.displayPath,
         style: {
-          fontSize: "12px",
+          fontSize: "13px",
           fontWeight: "600",
           color: "var(--text-normal)",
           flex: "1",
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+        },
+      });
+
+      // URL display
+      const urlEl = row.createEl("div", {
+        text: entry.displayPath || entry.url,
+        style: {
+          fontSize: "10px",
+          color: "var(--text-faint)",
+          marginBottom: "8px",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          opacity: "0.7",
         },
       });
 
@@ -434,9 +443,8 @@ export class MediaLibraryView extends ItemView {
     });
     // Default to expanded if there are feeds
     // Restore open state to avoid collapse on tag filter clicks
-    if (this._savedMediaOpen) section.open = true;
-    // Listen for toggle to track open state
-    section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
+    if (this._rssOpen) section.open = true;
+    section.addEventListener("toggle", () => { this._rssOpen = section.open; });
 
     if (!feeds.length) {
       const empty = section.createEl("div", {
@@ -459,8 +467,9 @@ export class MediaLibraryView extends ItemView {
       return;
     }
 
+    const rssList = section.createEl("div", { style: { maxHeight: "300px", overflowY: "auto" } });
     feeds.forEach((feed: any) => {
-      const details = section.createEl("details", {
+      const details = rssList.createEl("details", {
         cls: "smart-media-library-details",
       });
       details.style.cssText =
@@ -629,9 +638,8 @@ export class MediaLibraryView extends ItemView {
       style: { fontSize: "11px", letterSpacing: "0.5px", fontWeight: "700" },
     });
     // Restore open state to avoid collapse on tag filter clicks
-    if (this._savedMediaOpen) section.open = true;
-    // Listen for toggle to track open state
-    section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
+    if (this._foldersOpen) section.open = true;
+    section.addEventListener("toggle", () => { this._foldersOpen = section.open; });
 
     if (!folders.length) {
       const empty = section.createEl("div", {
@@ -654,8 +662,9 @@ export class MediaLibraryView extends ItemView {
       return;
     }
 
+    const foldList = section.createEl("div", { style: { maxHeight: "300px", overflowY: "auto" } });
     folders.forEach((folderPath: string) => {
-      const details = section.createEl("details");
+      const details = foldList.createEl("details");
       details.style.cssText =
         "margin-bottom:10px;border:1px solid var(--background-modifier-border);border-radius:14px;background:var(--background-secondary);overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,0.04);";
 
