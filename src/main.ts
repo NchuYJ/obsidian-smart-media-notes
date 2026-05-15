@@ -13,7 +13,6 @@ import {
 } from "obsidian";
 import React from "react";
 import ReactDOM from "react-dom";
-import { createRoot } from "react-dom/client";
 
 import {
   SmartMediaNotesSettings,
@@ -27,7 +26,6 @@ import {
   formatSecondsAsTimestamp,
   parseTimestampToSeconds,
   parseSubtitleFile,
-  findCueAtTime,
   urlToSafeName,
   normalizeMediaCandidate,
   isPlayableMedia,
@@ -135,8 +133,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           button.title = alias ? alias + "\n" + resolvedDisplay : resolvedDisplay;
           button.style.cssText =
             "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-          button.style.backgroundColor = this.settings.urlColor;
-          button.style.color = this.settings.urlTextColor;
+          button.setCssProps({ "background-color": this.settings.urlColor });
+          button.setCssProps({ color: this.settings.urlTextColor });
           button.addEventListener("click", () => {
             this.activateView(
               resolved.playableUrl,
@@ -149,8 +147,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           const div = el.createEl("div");
           const button = div.createEl("button");
           button.innerText = "🎙 " + raw;
-          button.style.backgroundColor = this.settings.urlColor;
-          button.style.color = this.settings.urlTextColor;
+          button.setCssProps({ "background-color": this.settings.urlColor });
+          button.setCssProps({ color: this.settings.urlTextColor });
           button.addEventListener("click", () => {
             new PodcastModal(this.app, this, raw, this.editor!).open();
           });
@@ -164,8 +162,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
           button.title = alias ? alias + "\n" + raw : raw;
           button.style.cssText =
             "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
-          button.style.backgroundColor = this.settings.urlColor;
-          button.style.color = this.settings.urlTextColor;
+          button.setCssProps({ "background-color": this.settings.urlColor });
+          button.setCssProps({ color: this.settings.urlTextColor });
           button.addEventListener("click", () => {
             this.activateView(raw, this.editor);
           });
@@ -307,7 +305,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
         audio.addEventListener("timeupdate", () => {
           if (audio.duration) {
             // Hide the static duration label during playback, show countdown
-            durationSpan.style.display = "none";
+            durationSpan.setCssProps({ display: "none" });
             const remain = audio.duration - audio.currentTime;
             currentSpan.textContent = "-" + fmtSec(remain);
             currentSpan.style.display = "inline";
@@ -1140,7 +1138,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     await this.refreshLibraryView();
   }
 
-  
   // ---- Timestamp collection ----
   async trackTimestamp(url: string, _meta: { displayPath?: string; sourceLabel?: string; title?: string; }): Promise<void> {
     const title = _meta.title || _meta.displayPath || urlToSafeName(url);
@@ -1184,7 +1181,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.settings.timestampCollection = collection;
     await this.saveSettings();
   }
-
 
   // ---- Reconcile saved media from vault notes ----
   async reconcileTimestampCollection(): Promise<void> {
