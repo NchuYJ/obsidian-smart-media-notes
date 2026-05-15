@@ -138,8 +138,244 @@ export class MediaLibraryView extends ItemView {
       style: { fontWeight: "700", fontSize: "16px", letterSpacing: "0.01em" },
     });
 
+    
+    this.renderSavedMediaSection(wrap);
     this.renderRssSection(wrap);
     this.renderFolderSection(wrap);
+  }
+
+
+  private renderSavedMediaSection(parent: HTMLElement): void {
+    const collection = (this.plugin.settings.timestampCollection || []) as Array<{
+      url: string;
+      displayPath: string;
+      notePath: string;
+      title: string;
+      sourceLabel: string;
+      tags: string[];
+      lastOpened: number;
+    }>;
+
+    const section = parent.createEl("div", {
+      style: { padding: "12px 12px 0" },
+    });
+    section.createEl("div", {
+      text: "Saved Media",
+      style: {
+        fontSize: "11px",
+        fontWeight: "700",
+        color: "var(--text-muted)",
+        textTransform: "uppercase",
+        letterSpacing: "0.5px",
+        margin: "0 4px 10px",
+      },
+    });
+
+    if (!collection.length) {
+      section.createEl("div", {
+        text:
+          "Media you open via \`\`\`timestamp-url will appear here. \nClick to jump to the note, click ✕ to remove.",
+        style: {
+          margin: "0 4px 12px",
+          padding: "12px",
+          border: "1px dashed var(--background-modifier-border)",
+          borderRadius: "8px",
+          color: "var(--text-muted)",
+          fontSize: "11px",
+          lineHeight: "1.5",
+        },
+      });
+      return;
+    }
+
+    // Sort newest first
+    const sorted = [...collection].sort((a, b) => b.lastOpened - a.lastOpened);
+
+    sorted.forEach((entry, idx) => {
+      const row = section.createEl("div");
+      row.style.cssText =
+        "margin-bottom:8px;padding:10px 12px;border:1px solid var(--background-modifier-border);" +
+        "border-radius:10px;background:var(--background-secondary);cursor:pointer;" +
+        "transition:background 0.15s;";
+      row.addEventListener("mouseenter", () => {
+        row.style.background = "var(--background-modifier-hover)";
+      });
+      row.addEventListener("mouseleave", () => {
+        row.style.background = "var(--background-secondary)";
+      });
+
+      // Title line: click to jump to note
+      const titleRow = row.createEl("div", {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          marginBottom: "4px",
+        },
+      });
+
+      const titleEl = titleRow.createEl("span", {
+        text: entry.title || entry.displayPath,
+        style: {
+          fontSize: "12px",
+          fontWeight: "600",
+          color: "var(--text-normal)",
+          flex: "1",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        },
+      });
+
+      // Remove button
+      const removeBtn = titleRow.createEl("span", {
+        text: "✕",
+        title: "Remove from collection",
+      });
+      removeBtn.style.cssText =
+        "font-size:10px;color:var(--text-faint);cursor:pointer;padding:2px;opacity:0.4;transition:opacity 0.15s;";
+      removeBtn.addEventListener("mouseenter", () => { removeBtn.style.opacity = "1"; removeBtn.style.color = "var(--text-error)"; });
+      removeBtn.addEventListener("mouseleave", () => { removeBtn.style.opacity = "0.4"; removeBtn.style.color = "var(--text-faint)"; });
+      removeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const coll = this.plugin.settings.timestampCollection || [];
+        const pos = coll.findIndex(
+          (e: any) => e.url === entry.url && e.notePath === entry.notePath
+        );
+        if (pos >= 0) {
+          coll.splice(pos, 1);
+          this.plugin.settings.timestampCollection = coll;
+          this.plugin.saveSettings();
+          this.render();
+        }
+      });
+
+      // Sub-info line
+      const infoLine = row.createEl("div", {
+        style: {
+          fontSize: "10px",
+          color: "var(--text-faint)",
+          marginBottom: "4px",
+          display: "flex",
+          gap: "8px",
+          alignItems: "center",
+        },
+      });
+      infoLine.createEl("span", { text: entry.sourceLabel || "", style: { opacity: "0.6" } });
+      if (entry.notePath) {
+        const noteLink = infoLine.createEl("span", {
+          text: "📄 " + entry.notePath.split("/").pop()?.replace(/.md$/, "") || "",
+          style: { cursor: "pointer", color: "var(--text-accent)" },
+        });
+        noteLink.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const file = this.app.vault.getAbstractFileByPath(entry.notePath);
+          if (file) {
+            // @ts-ignore
+            this.app.workspace.getLeaf().openFile(file);
+          }
+        });
+      }
+      const d = new Date(entry.lastOpened);
+      infoLine.createEl("span", {
+        text: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        style: { opacity: "0.6", marginLeft: "auto" },
+      });
+
+      // Tags
+      const tagRow = row.createEl("div", {
+        style: { display: "flex", flexWrap: "wrap", gap: "3px", alignItems: "center" },
+      });
+      entry.tags.forEach((tag) => {
+        const pill = tagRow.createEl("span", {
+          text: tag,
+          style: {
+            fontSize: "9px",
+            padding: "1px 6px",
+            borderRadius: "8px",
+            background: "var(--interactive-accent)",
+            color: "var(--text-on-accent)",
+            cursor: "pointer",
+          },
+        });
+        pill.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const coll = this.plugin.settings.timestampCollection || [];
+          const pos = coll.findIndex(
+            (e: any) => e.url === entry.url && e.notePath === entry.notePath
+          );
+          if (pos >= 0) {
+            coll[pos].tags = coll[pos].tags.filter((t: string) => t !== tag);
+            this.plugin.settings.timestampCollection = coll;
+            this.plugin.saveSettings();
+            this.render();
+          }
+        });
+      });
+
+      // Add tag button
+      const addTagBtn = tagRow.createEl("span", {
+        text: "+tag",
+        style: {
+          fontSize: "9px",
+          padding: "1px 6px",
+          borderRadius: "8px",
+          border: "1px dashed var(--background-modifier-border)",
+          color: "var(--text-faint)",
+          cursor: "pointer",
+        },
+      });
+      addTagBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // Create inline input
+        const oldBtn = addTagBtn;
+        oldBtn.style.display = "none";
+        const input = tagRow.createEl("input");
+        input.style.cssText =
+          "font-size:9px;width:50px;padding:1px 4px;border:1px solid var(--interactive-accent);" +
+          "border-radius:6px;background:var(--background-primary);color:var(--text-normal);";
+        input.placeholder = "tag";
+        input.focus();
+        const finish = () => {
+          const val = input.value.trim();
+          input.remove();
+          oldBtn.style.display = "";
+          if (val) {
+            const coll = this.plugin.settings.timestampCollection || [];
+            const pos = coll.findIndex(
+              (e: any) => e.url === entry.url && e.notePath === entry.notePath
+            );
+            if (pos >= 0) {
+              if (!coll[pos].tags.includes(val)) {
+                coll[pos].tags.push(val);
+                this.plugin.settings.timestampCollection = coll;
+                this.plugin.saveSettings();
+                this.render();
+              }
+            }
+          }
+        };
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") finish();
+          if (ke.key === "Escape") { input.remove(); oldBtn.style.display = ""; }
+        });
+        input.addEventListener("blur", finish);
+      });
+
+      // Click row to jump to note and open media
+      row.addEventListener("click", async () => {
+        const noteFile = this.app.vault.getAbstractFileByPath(entry.notePath);
+        if (noteFile) {
+          // @ts-ignore
+          this.app.workspace.getLeaf().openFile(noteFile);
+        }
+        await this.plugin.openLibraryMedia(entry.url, null, {
+          title: entry.title,
+          sourceLabel: entry.sourceLabel,
+          displayPath: entry.displayPath,
+        });
+      });
+    });
   }
 
   private renderRssSection(parent: HTMLElement): void {

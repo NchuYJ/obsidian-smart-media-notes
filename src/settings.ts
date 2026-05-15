@@ -2,6 +2,16 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type SmartMediaNotesPlugin from "./main";
 import { DEFAULT_VIDEO_FORMATS, DEFAULT_AUDIO_FORMATS } from "./utils";
 
+export interface TimestampEntry {
+  url: string;
+  displayPath: string;
+  notePath: string;
+  title: string;
+  sourceLabel: string;
+  tags: string[];
+  lastOpened: number;
+}
+
 export interface SmartMediaNotesSettings {
   noteTitle: string;
   urlStartTimeMap: Map<string, number>;
@@ -26,6 +36,7 @@ export interface SmartMediaNotesSettings {
   videoFormats: string;
   audioFormats: string;
   autoInsertLibraryNote: boolean;
+  timestampCollection: TimestampEntry[];
   subtitleFileMap: Record<string, string>;
   subtitleLibrary: Record<string, any[]>;
 }
@@ -53,6 +64,7 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   videoFormats: DEFAULT_VIDEO_FORMATS,
   audioFormats: DEFAULT_AUDIO_FORMATS,
   autoInsertLibraryNote: false,
+  timestampCollection: [],
   subtitleFileMap: {},
   subtitleLibrary: {},
 };

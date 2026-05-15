@@ -19,6 +19,7 @@ import {
   SmartMediaNotesSettings,
   DEFAULT_SETTINGS,
   TimestampPluginSettingTab,
+  TimestampEntry,
 } from "./settings";
 import { VideoView, MediaLibraryView, VIDEO_VIEW, LIBRARY_VIEW } from "./view/VideoView";
 import VideoContainer from "./view/VideoContainer";
@@ -287,7 +288,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
         audio.addEventListener("timeupdate", () => {
           if (audio.duration) {
-            currentSpan.textContent = fmtSec(audio.currentTime);
+            const remain = audio.duration - audio.currentTime;
+            currentSpan.textContent = "-" + fmtSec(remain);
             currentSpan.style.display = "inline";
 
             const pct = audio.currentTime / audio.duration;
@@ -1086,6 +1088,38 @@ export default class SmartMediaNotesPlugin extends Plugin {
       editor!,
       vaultFile || null,
     );
+  }
+
+  
+  // ---- Timestamp collection ----
+  trackTimestamp(url: string, meta: { displayPath?: string; sourceLabel?: string; title?: string; }): void {
+    const activeFile = this.app.workspace.getActiveFile();
+    const notePath = activeFile?.path || "";
+    const noteTitle = activeFile?.basename || "";
+    const entry: TimestampEntry = {
+      url: url,
+      displayPath: meta.displayPath || url,
+      notePath: notePath,
+      title: meta.title || meta.displayPath || urlToSafeName(url),
+      sourceLabel: meta.sourceLabel || "",
+      tags: [],
+      lastOpened: Date.now(),
+    };
+    const collection = this.settings.timestampCollection || [];
+    // Deduplicate by url+notePath
+    const existing = collection.findIndex(
+      (e) => e.url === entry.url && e.notePath === entry.notePath
+    );
+    if (existing >= 0) {
+      entry.tags = collection[existing].tags;
+      collection[existing] = entry;
+    } else {
+      collection.unshift(entry);
+    }
+    // Keep max 100 entries
+    if (collection.length > 100) collection.length = 100;
+    this.settings.timestampCollection = collection;
+    this.saveSettings();
   }
 
   // ---- View management ----
