@@ -100,8 +100,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
             const div = el.createEl("div");
             const button = div.createEl("button");
             button.innerText = match[0];
-            button.style.backgroundColor = this.settings.timestampColor;
-            button.style.color = this.settings.timestampTextColor;
+            button.setCssProps({ "background-color": this.settings.timestampColor });
+            button.setCssProps({ color: this.settings.timestampTextColor });
             button.addEventListener("click", () => {
               const seconds = parseTimestampToSeconds(match[0]);
               if (this.player) this.player.seekTo(seconds);
