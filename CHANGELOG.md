@@ -34,7 +34,8 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 - **Frontmatter tag sync now works**: Replaced broken `instanceof this.app.vault.fileClass` check (non-existent property) with simple `if (activeFile)` — tags now correctly sync from note YAML frontmatter.
 - **Removed ugly empty state text**: "Media you open via..." banner removed — empty Saved Media section now just shows collapsed with count 0.
 - **Reconcile feature**: New `🔄` button in Saved Media header + "Reconcile saved media collection" command. Scans entire vault for `\`\`\`timestamp-url` blocks, resolves them, and rebuilds the Saved Media collection — handles deleted/moved timestamps.
-- **Timestamp URL aliases**: `\`\`\`timestamp-url` blocks now support a **two-line format** — first line = alias/shorthand name, second line = full URL. The alias is displayed as the button text and used as the Saved Media entry title. Single-line format remains backward-compatible. New blocks created via `trigger-player`, library clicks, and podcast modal automatically include a human-readable alias.
+- **Timestamp URL aliases**: `\`\`\`timestamp-url` blocks now support `name | link` format — pipe-separated single line. The alias is displayed as the button text and used as the Saved Media entry title. Backward-compatible with two-line and URL-only formats. New blocks automatically emit `name | link` format.
+- **Wrap selection hotkey**: New command `Insert timestamp-url from selection (name \| link)` — select `Name | https://...` text and press hotkey to wrap it in a `\`\`\`timestamp-url` block. `trigger-player` command now also parses `name | link` selections.
 
 ### Changed
 - Saved Media section UI unified with RSS/Folders (`<details>` with count). `_savedMediaFilterTag` state preserved across re-renders.
