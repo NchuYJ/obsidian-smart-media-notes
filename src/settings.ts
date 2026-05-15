@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type SmartMediaNotesPlugin from "./main";
+import { DEFAULT_VIDEO_FORMATS, DEFAULT_AUDIO_FORMATS } from "./utils";
 
 export interface SmartMediaNotesSettings {
   noteTitle: string;
@@ -22,6 +23,8 @@ export interface SmartMediaNotesSettings {
   subtitleStorageFolder: string;
   rssSubscriptions: Array<{ title: string; url: string } | string>;
   mediaFolders: string[];
+  videoFormats: string;
+  audioFormats: string;
   autoInsertLibraryNote: boolean;
   subtitleFileMap: Record<string, string>;
   subtitleLibrary: Record<string, any[]>;
@@ -47,6 +50,8 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   subtitleStorageFolder: "Subtitles",
   rssSubscriptions: [],
   mediaFolders: [],
+  videoFormats: DEFAULT_VIDEO_FORMATS,
+  audioFormats: DEFAULT_AUDIO_FORMATS,
   autoInsertLibraryNote: false,
   subtitleFileMap: {},
   subtitleLibrary: {},
@@ -337,6 +342,36 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
               this.plugin.parseRssSubscriptions(value);
             await this.plugin.saveSettings();
             await this.plugin.refreshLibraryView();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Video formats")
+      .setDesc(
+        "Comma-separated video file extensions (no dots).",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_VIDEO_FORMATS)
+          .setValue(this.plugin.settings.videoFormats || DEFAULT_VIDEO_FORMATS)
+          .onChange(async (value) => {
+            this.plugin.settings.videoFormats = value || DEFAULT_VIDEO_FORMATS;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Audio formats")
+      .setDesc(
+        "Comma-separated audio file extensions (no dots).",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_AUDIO_FORMATS)
+          .setValue(this.plugin.settings.audioFormats || DEFAULT_AUDIO_FORMATS)
+          .onChange(async (value) => {
+            this.plugin.settings.audioFormats = value || DEFAULT_AUDIO_FORMATS;
+            await this.plugin.saveSettings();
           }),
       );
 

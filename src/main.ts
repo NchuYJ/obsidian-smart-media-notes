@@ -32,6 +32,8 @@ import {
   isPlayableMedia,
   MEDIA_EXTENSIONS,
   isAudioFile,
+  setMediaFormats,
+  getVideoFormats,
   compareDictation,
   formatDictationResult,
   SubtitleCue,
@@ -599,7 +601,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
       const mimeMap: Record<string, string> = {
         ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg",
         ".wav": "audio/wav", ".flac": "audio/flac", ".opus": "audio/ogg",
-        ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+        ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
         ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
         ".flv": "video/x-flv", ".ogv": "video/ogg", ".wmv": "video/x-ms-wmv",
         ".m4b": "audio/mp4",
@@ -707,9 +709,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
     if (!trimmed) return null;
     if (
       /^([a-zA-Z]:\\|\/)/.test(trimmed) &&
-      /\.(mp4|mov|avi|mkv|webm|flv|ogv|wmv|mp3|m4a|m4b|aac|ogg|oga|wav|flac|opus|wma)$/i.test(
-        trimmed,
-      )
+      MEDIA_EXTENSIONS.some(function(ext: string) {
+        return trimmed.toLowerCase().endsWith("." + ext);
+      })
     ) {
       return {
         playableUrl: "__system__:" + trimmed,
@@ -931,7 +933,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           try {
             entries = fs.readdirSync(dir, { withFileTypes: true });
           } catch (_) {
-            return;
+            entries = [];
           }
           for (const entry of entries) {
             const fullPath = path.join(dir, entry.name);
@@ -1178,7 +1180,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
         const audio = isAudioFile(url) ||
           (systemPath ? isAudioFile(systemPath) : false) ||
           (vaultFile?.extension
-            ? !["mp4","mov","avi","mkv","webm","flv","ogv","wmv"].includes(vaultFile.extension.toLowerCase())
+            ? !getVideoFormats().includes(vaultFile.extension.toLowerCase())
             : false);
         leaf.setEphemeralState({
           url: resolvedUrl,
@@ -1269,6 +1271,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
         await this.loadData(),
       ) as SmartMediaNotesSettings;
     }
+    // Apply user-defined media format lists to the shared module-level lists
+    setMediaFormats(
+      this.settings.videoFormats || DEFAULT_SETTINGS.videoFormats!,
+      this.settings.audioFormats || DEFAULT_SETTINGS.audioFormats!,
+    );
   }
 
   async saveSettings(): Promise<void> {
@@ -1623,9 +1630,10 @@ class SampleModal extends Modal {
     const { contentEl } = this;
     const input = contentEl.createEl("input");
     input.setAttribute("type", "file");
+    const allFormats = [...MEDIA_EXTENSIONS];
     input.setAttribute(
       "accept",
-      "video/*,audio/*,.mp3,.m4a,.m4b,.aac,.ogg,.wav,.flac,.opus,.mp4,.mov,.avi,.mkv,.webm,.flv,.ogv",
+      "video/*,audio/*," + allFormats.map(function(e: string) { return "." + e; }).join(","),
     );
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;

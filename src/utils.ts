@@ -27,17 +27,51 @@ export interface ResolvedMedia {
   vaultFile?: any;
 }
 
-export const MEDIA_EXTENSIONS = [
-  "mp4", "mov", "avi", "mkv", "webm", "flv", "ogv", "wmv",
-  "mp3", "m4a", "m4b", "aac", "ogg", "oga", "wav", "flac", "opus", "wma",
-];
+// Default media format lists (user can override via plugin settings)
+export const DEFAULT_VIDEO_FORMATS = "mp4,m4v,mov,avi,mkv,webm,flv,ogv,wmv";
+export const DEFAULT_AUDIO_FORMATS = "mp3,m4a,m4b,aac,ogg,oga,wav,flac,opus,wma";
 
-export const MEDIA_URL_EXTENSION_RE =
-  /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus|webm|mp4|mov|avi|mkv|wmv|flv|ogv|m3u8|mpd)$/i;
+// Mutable shared media extension lists — updated from plugin settings
+// Start with the full default combined list
+let _currentVideoFormats = DEFAULT_VIDEO_FORMATS;
+let _currentAudioFormats = DEFAULT_AUDIO_FORMATS;
 
-/** 音频扩展名列表 — 用于判断文件是否为纯音频 */
-export const AUDIO_EXTENSIONS_RE =
-  /\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus)(\?.*)?$/i;
+function buildCombined(): string[] {
+  return [...new Set([
+    ..._currentVideoFormats.split(","),
+    ..._currentAudioFormats.split(","),
+  ])];
+}
+
+export let MEDIA_EXTENSIONS: string[] = buildCombined();
+export let MEDIA_URL_EXTENSION_RE: RegExp = new RegExp(
+  "\\.(" + buildCombined().join("|") + ")$", "i"
+);
+export let AUDIO_EXTENSIONS_RE: RegExp = new RegExp(
+  "\\.(" + DEFAULT_AUDIO_FORMATS.split(",").join("|") + ")(\\?.*)?$", "i"
+);
+
+/** Update media extension lists from settings (called from plugin.loadSettings) */
+export function setMediaFormats(videoFormats: string, audioFormats: string): void {
+  _currentVideoFormats = videoFormats || DEFAULT_VIDEO_FORMATS;
+  _currentAudioFormats = audioFormats || DEFAULT_AUDIO_FORMATS;
+  MEDIA_EXTENSIONS = buildCombined();
+  const all = buildCombined();
+  MEDIA_URL_EXTENSION_RE = new RegExp("\\.(" + all.join("|") + ")$", "i");
+  AUDIO_EXTENSIONS_RE = new RegExp(
+    "\\.(" + _currentAudioFormats.split(",").join("|") + ")(\\?.*)?$", "i"
+  );
+}
+
+/** Get the current video format list as a string array */
+export function getVideoFormats(): string[] {
+  return _currentVideoFormats.split(",");
+}
+
+/** Get the current audio format list as a string array */
+export function getAudioFormats(): string[] {
+  return _currentAudioFormats.split(",");
+}
 
 /** 判断 URL/路径是否为音频文件 */
 export function isAudioFile(url: string): boolean {
