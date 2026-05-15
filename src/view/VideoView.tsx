@@ -190,7 +190,7 @@ export class MediaLibraryView extends ItemView {
         style: {
           display: "flex",
           flexWrap: "wrap",
-          gap: "10px",
+          gap: "0px",
           margin: "8px 0 14px",
           alignItems: "center",
         },
@@ -200,6 +200,8 @@ export class MediaLibraryView extends ItemView {
         style: {
           fontSize: "10px",
           padding: "5px 14px",
+          marginRight: "6px",
+          marginBottom: "4px",
           borderRadius: "6px",
           cursor: "pointer",
           fontWeight: activeFilterTag ? "400" : "600",
@@ -219,6 +221,8 @@ export class MediaLibraryView extends ItemView {
           style: {
             fontSize: "10px",
             padding: "5px 14px",
+            marginRight: "6px",
+            marginBottom: "4px",
             borderRadius: "6px",
             cursor: "pointer",
             fontWeight: isActive ? "600" : "400",
@@ -382,7 +386,7 @@ export class MediaLibraryView extends ItemView {
 
       // Tags
       const tagRow = row.createEl("div", {
-        style: { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" },
+        style: { display: "flex", flexWrap: "wrap", alignItems: "center" },
       });
       entry.tags.forEach((tag) => {
         const pill = tagRow.createEl("span", {
@@ -390,6 +394,7 @@ export class MediaLibraryView extends ItemView {
           style: {
             fontSize: "10px",
             padding: "3px 10px",
+            marginRight: "4px",
             borderRadius: "8px",
             background: "var(--interactive-accent)",
             color: "var(--text-on-accent)",
