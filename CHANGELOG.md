@@ -31,6 +31,9 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 - **Tag filter bar UI**: Pills now use `border` instead of background-only style, better matching the Library section aesthetic. Filter bar only renders when there are tags.
 - **Sections closed by default**: Removed `section.open = true` from all three Library sections — they now start collapsed to prevent layout overflow in busy vaults.
 - **Saved media click no longer re-inserts timestamp**: Added `skipInsert` option to `openLibraryMedia()`. Saved Media entries now open without creating duplicate `\`\`\`timestamp-url` blocks (the note already has one).
+- **Frontmatter tag sync now works**: Replaced broken `instanceof this.app.vault.fileClass` check (non-existent property) with simple `if (activeFile)` — tags now correctly sync from note YAML frontmatter.
+- **Removed ugly empty state text**: "Media you open via..." banner removed — empty Saved Media section now just shows collapsed with count 0.
+- **Reconcile feature**: New `🔄` button in Saved Media header + "Reconcile saved media collection" command. Scans entire vault for `\`\`\`timestamp-url` blocks, resolves them, and rebuilds the Saved Media collection — handles deleted/moved timestamps.
 
 ### Changed
 - Saved Media section UI unified with RSS/Folders (`<details>` with count). `_savedMediaFilterTag` state preserved across re-renders.
