@@ -118,17 +118,21 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor(
       "timestamp-url",
       (source: string, el: HTMLElement) => {
-        const raw = source.trim();
+        const p = parseTimestampUrlBlock(source);
+        const raw = p.url;
+        const alias = p.alias;
         const resolved = this.resolveMediaUrl(raw);
         if (resolved) {
           const div = el.createEl("div");
           const button = div.createEl("button");
+          const resolvedDisplay = resolved.displayPath;
+          const displayRaw = alias || resolvedDisplay;
           const display =
-            resolved.displayPath.length > 55
-              ? resolved.displayPath.slice(0, 52) + "..."
-              : resolved.displayPath;
+            displayRaw.length > 55
+              ? displayRaw.slice(0, 52) + "..."
+              : displayRaw;
           button.innerText = display;
-          button.title = resolved.displayPath;
+          button.title = alias ? alias + "\n" + resolvedDisplay : resolvedDisplay;
           button.style.cssText =
             "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
           button.style.backgroundColor = this.settings.urlColor;
@@ -155,9 +159,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           const div = el.createEl("div");
           const button = div.createEl("button");
-          const display = raw.length > 55 ? raw.slice(0, 52) + "..." : raw;
+          const display = alias || raw.length > 55 ? (alias || raw).length > 55 ? (alias || raw).slice(0, 52) + "..." : (alias || raw) : raw;
           button.innerText = display;
-          button.title = raw;
+          button.title = alias ? alias + "\n" + raw : raw;
           button.style.cssText =
             "max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
           button.style.backgroundColor = this.settings.urlColor;
@@ -381,9 +385,9 @@ export default class SmartMediaNotesPlugin extends Plugin {
             title: resolved.displayPath.split("/").pop() || resolved.displayPath,
           });
           this.refreshLibraryView();
-        } else if (this.isPodcastUrl(selected)) {
+        } else if (this.isPodcastUrl(selectedUrl)) {
           this.editor = editor;
-          new PodcastModal(this.app, this, selected, editor).open();
+          new PodcastModal(this.app, this, selectedUrl, editor).open();
         } else if (/^https?:\/\//i.test(selected)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
@@ -398,7 +402,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
               );
           this.editor = editor;
           await this.trackTimestamp(selectedUrl, {
-            displayPath: selected,
+            displayPath: selectedUrl,
             sourceLabel: "URL",
             title: selectedAlias || selectedUrl,
           });
