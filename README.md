@@ -138,6 +138,20 @@ The production build applies:
 
 **Bundle size: ~259 KB** (down from 1.35 MB in the unbundled dev build).
 
+## Acknowledgments
+
+This project is derived from [**ObsidianTimestampNotes**](https://github.com/juliang22/ObsidianTimestampNotes) by [**juliang22**](https://github.com/juliang22) — the original plugin that introduced timestamp code blocks and media timestamp note-taking in Obsidian.
+
+Smart Media Notes extends that foundation with:
+- Full media player (video + audio) embedded in the workspace
+- Subtitle import and synced display
+- Voice recording with inline playback
+- RSS podcast browser
+- Vault and local filesystem media browser
+- Saved media collection with tag filtering
+- Configurable media format support
+- Dictation mode for language learning
+
 ## License
 
 MIT
