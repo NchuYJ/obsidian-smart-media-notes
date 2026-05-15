@@ -1,6 +1,6 @@
 {
   "name": "obsidian-smart-media-notes",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Media notes with timestamp, subtitle import, voice recording, and vault media browser.",
   "main": "main.js",
   "scripts": {

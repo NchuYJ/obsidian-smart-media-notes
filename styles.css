@@ -503,8 +503,10 @@
 
 /* ── Timestamp URL Button ── */
 .smn-dynamic-btn {
-  background: var(--smn-btn-bg, var(--interactive-accent));
-  color: var(--smn-btn-color, var(--text-on-accent));
+  background: var(--smn-btn-bg, var(--interactive-accent)) !important;
+  background-color: var(--smn-btn-bg, var(--interactive-accent)) !important;
+  color: var(--smn-btn-color, var(--text-on-accent)) !important;
+  border-color: var(--smn-btn-bg, var(--interactive-accent)) !important;
 }
 .smn-timestamp-url-btn {
   max-width: 100%;
