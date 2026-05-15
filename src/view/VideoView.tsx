@@ -156,8 +156,8 @@ export class MediaLibraryView extends ItemView {
     });
     const summary = section.createEl("summary");
     summary.style.cssText =
-      "font-size:11px;font-weight:700;color:var(--text-muted);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "font-size:12px;font-weight:600;color:var(--text-normal);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " Saved Media",
@@ -445,13 +445,12 @@ export class MediaLibraryView extends ItemView {
       )
       .filter((feed: any) => feed && feed.url);
 
-    const section = parent.createEl("details", {
-      style: { padding: "12px 12px 0" },
-    });
+    const section = parent.createEl("details");
+    section.style.cssText = "padding:16px 12px 0;border-top:1px solid var(--background-modifier-border)";
     const summary = section.createEl("summary");
     summary.style.cssText =
-      "font-size:11px;font-weight:700;color:var(--text-muted);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "font-size:12px;font-weight:600;color:var(--text-normal);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " RSS Subscriptions",
@@ -651,16 +650,18 @@ export class MediaLibraryView extends ItemView {
       )
       .map((folder: string) => folder.trim());
 
-    const section = parent.createEl("details", { style: { padding: "12px" } });
+    const section = parent.createEl("details");
+    section.style.cssText = "padding:16px 12px 0;border-top:1px solid var(--background-modifier-border)";
     const summary = section.createEl("summary");
     summary.style.cssText =
-      "font-size:11px;font-weight:700;color:var(--text-muted);" +
-      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 10px;" +
+      "font-size:12px;font-weight:600;color:var(--text-normal);" +
+      "text-transform:uppercase;letter-spacing:0.5px;margin:0 0 8px;" +
       "cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;";
     summary.createEl("span", {
       text: " Media Folders",
       style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
     });
+    summary.createEl("span", { text: String(folders.length), style: { fontSize: "11px", color: "var(--text-faint)", fontWeight: "400" } });
     summary.createEl("span", {
       text: String(folders.length),
       style: { fontSize: "11px", color: "var(--text-faint)", fontWeight: "400" },
