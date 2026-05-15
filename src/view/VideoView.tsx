@@ -151,9 +151,8 @@ export class MediaLibraryView extends ItemView {
       lastOpened: number;
     }>;
 
-    const section = parent.createEl("details", {
-      style: { padding: "12px 12px 0" },
-    });
+    const section = parent.createEl("details");
+    section.style.cssText = "padding:12px 12px 0";
     const summary = section.createEl("summary");
     summary.style.cssText =
       "font-size:12px;font-weight:600;color:var(--text-normal);" +
@@ -662,10 +661,6 @@ export class MediaLibraryView extends ItemView {
       style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
     });
     summary.createEl("span", { text: String(folders.length), style: { fontSize: "11px", color: "var(--text-faint)", fontWeight: "400" } });
-    summary.createEl("span", {
-      text: String(folders.length),
-      style: { fontSize: "11px", color: "var(--text-faint)", fontWeight: "400" },
-    });
     // Restore open state to avoid collapse on tag filter clicks
     if (this._foldersOpen) section.open = true;
     section.addEventListener("toggle", () => { this._foldersOpen = section.open; });
