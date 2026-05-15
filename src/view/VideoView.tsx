@@ -186,51 +186,31 @@ export class MediaLibraryView extends ItemView {
 
     // Tag filter bar — integrated into the summary row
     if (allTags.length) {
-      const filterBar = section.createEl("div", {
-        style: {
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0px",
-          margin: "8px 0 14px",
-          alignItems: "center",
-        },
-      });
-      const allPill = filterBar.createEl("span", {
-        text: "All",
-        style: {
-          fontSize: "10px",
-          padding: "5px 14px",
-          marginRight: "6px",
-          marginBottom: "4px",
-          borderRadius: "6px",
-          cursor: "pointer",
-          fontWeight: activeFilterTag ? "400" : "600",
-          color: activeFilterTag ? "var(--text-muted)" : "var(--text-on-accent)",
-          background: activeFilterTag ? "transparent" : "var(--interactive-accent)",
-          border: "1px solid " + (activeFilterTag ? "var(--background-modifier-border)" : "var(--interactive-accent)"),
-        },
-      });
+      const filterBar = section.createEl("div");
+      filterBar.style.cssText =
+        "display:flex;flex-wrap:wrap;margin:8px 0 14px;align-items:center";
+      const allPill = filterBar.createEl("span", { text: "All" });
+      allPill.style.cssText =
+        "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
+        "border-radius:6px;cursor:pointer;" +
+        "font-weight:" + (activeFilterTag ? "400" : "600") + ";" +
+        "color:" + (activeFilterTag ? "var(--text-muted)" : "var(--text-on-accent)") + ";" +
+        "background:" + (activeFilterTag ? "transparent" : "var(--interactive-accent)") + ";" +
+        "border:1px solid " + (activeFilterTag ? "var(--background-modifier-border)" : "var(--interactive-accent)");
       allPill.addEventListener("click", () => {
         this._savedMediaFilterTag = "";
         this.render();
       });
       allTags.forEach((tag) => {
         const isActive = activeFilterTag === tag;
-        const pill = filterBar.createEl("span", {
-          text: tag,
-          style: {
-            fontSize: "10px",
-            padding: "5px 14px",
-            marginRight: "6px",
-            marginBottom: "4px",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: isActive ? "600" : "400",
-            color: isActive ? "var(--text-on-accent)" : "var(--text-muted)",
-            background: isActive ? "var(--interactive-accent)" : "transparent",
-            border: "1px solid " + (isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)"),
-          },
-        });
+        const pill = filterBar.createEl("span", { text: tag });
+        pill.style.cssText =
+          "font-size:10px;padding:5px 14px;margin-right:6px;margin-bottom:4px;" +
+          "border-radius:6px;cursor:pointer;" +
+          "font-weight:" + (isActive ? "600" : "400") + ";" +
+          "color:" + (isActive ? "var(--text-on-accent)" : "var(--text-muted)") + ";" +
+          "background:" + (isActive ? "var(--interactive-accent)" : "transparent") + ";" +
+          "border:1px solid " + (isActive ? "var(--interactive-accent)" : "var(--background-modifier-border)");
         pill.addEventListener("click", () => {
           this._savedMediaFilterTag = tag === activeFilterTag ? "" : tag;
           this.render();
@@ -389,18 +369,11 @@ export class MediaLibraryView extends ItemView {
         style: { display: "flex", flexWrap: "wrap", alignItems: "center" },
       });
       entry.tags.forEach((tag) => {
-        const pill = tagRow.createEl("span", {
-          text: tag,
-          style: {
-            fontSize: "10px",
-            padding: "3px 10px",
-            marginRight: "4px",
-            borderRadius: "8px",
-            background: "var(--interactive-accent)",
-            color: "var(--text-on-accent)",
-            cursor: "pointer",
-          },
-        });
+        const pill = tagRow.createEl("span", { text: tag });
+        pill.style.cssText =
+          "font-size:10px;padding:3px 10px;margin-right:4px;" +
+          "border-radius:8px;background:var(--interactive-accent);" +
+          "color:var(--text-on-accent);cursor:pointer";
         pill.addEventListener("click", (e) => {
           e.stopPropagation();
           this._savedMediaFilterTag = tag;
