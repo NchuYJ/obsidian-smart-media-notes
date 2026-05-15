@@ -76,6 +76,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
 
     await this.loadSettings();
 
+    // Reconcile saved media from vault notes
+    this.addCommand({
+      id: "reconcile-saved-media",
+      name: "Reconcile saved media collection",
+      callback: async () => {
+        await this.reconcileTimestampCollection();
+        await this.refreshLibraryView();
+      },
+    });
     this.addRibbonIcon("library", "Open Smart Media Library", () => {
       this.activateLibraryView();
     });
@@ -1135,7 +1144,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     const collection = this.settings.timestampCollection || [];
 
     // Auto-sync frontmatter tags from the note file
-    if (activeFile && activeFile instanceof this.app.vault.fileClass) {
+    if (activeFile) {
       try {
         const cache = this.app.metadataCache.getFileCache(activeFile);
         if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
@@ -1162,6 +1171,67 @@ export default class SmartMediaNotesPlugin extends Plugin {
     await this.saveSettings();
   }
 
+
+  // ---- Reconcile saved media from vault notes ----
+  async reconcileTimestampCollection(): Promise<void> {
+    const allFiles = this.app.vault.getMarkdownFiles();
+    const collection = (this.settings.timestampCollection || []) as TimestampEntry[];
+    const newCollection: TimestampEntry[] = [];
+    const seen = new Set<string>();
+
+    for (const file of allFiles) {
+      try {
+        const content = await this.app.vault.read(file);
+        // Find all ```timestamp-url blocks
+        const regex = /```timestamp-url\n([\s\S]*?)\n```/g;
+        let match;
+        while ((match = regex.exec(content)) !== null) {
+          const raw = match[1].trim();
+          if (!raw) continue;
+          const resolved = this.resolveMediaUrl(raw);
+          const url = resolved ? resolved.playableUrl : (/^https?:\/\//i.test(raw) ? raw : "");
+          if (!url) continue;
+
+          const key = url + "|" + file.path;
+          if (seen.has(key)) continue;
+          seen.add(key);
+
+          // Find existing entry to preserve manual tags
+          const existing = collection.find(
+            (e) => e.url === url && e.notePath === file.path
+          );
+
+          // Get frontmatter tags
+          let fmTags: string[] = [];
+          try {
+            const cache = this.app.metadataCache.getFileCache(file);
+            if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+              fmTags = [...cache.frontmatter.tags];
+            }
+          } catch (_) { /* ignore */ }
+
+          const entry: TimestampEntry = {
+            url,
+            displayPath: resolved?.displayPath || raw,
+            notePath: file.path,
+            title: resolved?.displayPath?.split("/").pop()?.replace(/\.[^.]+$/, "") || file.basename,
+            sourceLabel: resolved?.isVaultFile ? "Vault" : "URL",
+            tags: existing
+              ? [...new Set([...fmTags, ...existing.tags])]
+              : fmTags,
+            lastOpened: existing?.lastOpened || Date.now(),
+          };
+          newCollection.push(entry);
+        }
+      } catch (_) { /* skip unreadable files */ }
+    }
+
+    // Cap at 100
+    if (newCollection.length > 100) newCollection.length = 100;
+    this.settings.timestampCollection = newCollection;
+    await this.saveSettings();
+    new Notice(`Saved Media reconciled: ${newCollection.length} entries from ${allFiles.length} notes.`);
+  }
   // ---- View management ----
   async activateLibraryView(): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(LIBRARY_VIEW)[0];

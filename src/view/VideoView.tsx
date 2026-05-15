@@ -179,18 +179,6 @@ export class MediaLibraryView extends ItemView {
     // Closed by default
 
     if (!collection.length) {
-      section.createEl("div", {
-        text: "Media you open via \`\`\`timestamp-url will appear here.",
-        style: {
-          margin: "0 4px 12px",
-          padding: "12px",
-          border: "1px dashed var(--background-modifier-border)",
-          borderRadius: "8px",
-          color: "var(--text-muted)",
-          fontSize: "11px",
-          lineHeight: "1.5",
-        },
-      });
       return;
     }
 
