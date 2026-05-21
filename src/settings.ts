@@ -25,6 +25,9 @@ export interface SmartMediaNotesSettings {
   subtitleTemplate: string;
   showSubtitleOverlay: boolean;
   showSubtitleBrowser: boolean;
+  showMobileTimestampRail: boolean;
+  showMobileTimestampRailPreview: boolean;
+  timestampDisplayMode: string;
   subtitleOverlayFontSize: string; // small / medium / large / xlarge
   dictationLoopCount: string;     // 听写重复次数: "0"=无限, 或 1/2/3/5
   dictationLoopGap: string;       // 重复间隔(秒): "0.5" / "1" / "1.5" / "2"
@@ -35,6 +38,11 @@ export interface SmartMediaNotesSettings {
   mediaFolders: string[];
   videoFormats: string;
   audioFormats: string;
+  experimentalBilibiliDirectPlayback: boolean;
+  bilibiliCookie: string;
+  directPlayback: boolean;
+  directPlaybackOverrides: Record<string, boolean>;
+  ytdlpPath: string;
   autoInsertLibraryNote: boolean;
   timestampCollection: TimestampEntry[];
   subtitleFileMap: Record<string, string>;
@@ -53,6 +61,9 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   subtitleTemplate: "> [!quote] {time}\n> {text}\n",
   showSubtitleOverlay: true,
   showSubtitleBrowser: true,
+  showMobileTimestampRail: true,
+  showMobileTimestampRailPreview: false,
+  timestampDisplayMode: "time-subhead",
   subtitleOverlayFontSize: "large",
   dictationLoopCount: "0",
   dictationLoopGap: "0.5",
@@ -63,6 +74,11 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   mediaFolders: [],
   videoFormats: DEFAULT_VIDEO_FORMATS,
   audioFormats: DEFAULT_AUDIO_FORMATS,
+  experimentalBilibiliDirectPlayback: false,
+  bilibiliCookie: "",
+  directPlayback: true,
+  directPlaybackOverrides: {},
+  ytdlpPath: "yt-dlp",
   autoInsertLibraryNote: false,
   timestampCollection: [],
   subtitleFileMap: {},
@@ -95,6 +111,12 @@ const FONT_SIZES: Record<string, string> = {
   medium: "Medium (15px)",
   large: "Large (18px)",
   xlarge: "Extra Large (22px)",
+};
+
+const TIMESTAMP_DISPLAY_MODES: Record<string, string> = {
+  time: "Time only",
+  "time-subhead": "Time + subhead",
+  subhead: "Subhead only",
 };
 
 const LOOP_COUNTS: Record<string, string> = {
@@ -283,6 +305,50 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName("Mobile timestamp rail")
+      .setDesc(
+        "On mobile, show a compact timestamp-only rail in the squeezed note pane when the media player opens.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showMobileTimestampRail !== false)
+          .onChange(async (value) => {
+            this.plugin.settings.showMobileTimestampRail = value;
+            if (!value) this.plugin.clearMobileTimestampRail();
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Mobile timestamp note preview")
+      .setDesc(
+        "Add an expand button to mobile timestamp rail items so you can preview nearby note content without closing the player.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.showMobileTimestampRailPreview === true)
+          .onChange(async (value) => {
+            this.plugin.settings.showMobileTimestampRailPreview = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Timestamp display format")
+      .setDesc(
+        "Controls how timestamp blocks render when a #subhead is present. Old time-only blocks still work.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(TIMESTAMP_DISPLAY_MODES)
+          .setValue(this.plugin.settings.timestampDisplayMode || "time-subhead")
+          .onChange(async (value) => {
+            this.plugin.settings.timestampDisplayMode = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
       .setName("Subtitle overlay font size")
       .setDesc("Controls text size for both video subtitle overlay and audio subtitle banner.")
       .addDropdown((dropdown) =>
@@ -382,6 +448,65 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.audioFormats || DEFAULT_AUDIO_FORMATS)
           .onChange(async (value) => {
             this.plugin.settings.audioFormats = value || DEFAULT_AUDIO_FORMATS;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Experimental Bilibili direct playback")
+      .setDesc(
+        "Try to resolve Bilibili video pages to direct browser-playable media before falling back to the embedded player.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.experimentalBilibiliDirectPlayback)
+          .onChange(async (value) => {
+            this.plugin.settings.experimentalBilibiliDirectPlayback = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Bilibili cookie (experimental)")
+      .setDesc(
+        "Optional. Stored locally in this plugin's data. Use only on your own device; cookies are sensitive login credentials.",
+      )
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("SESSDATA=...; bili_jct=...")
+          .setValue(this.plugin.settings.bilibiliCookie || "")
+          .onChange(async (value) => {
+            this.plugin.settings.bilibiliCookie = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Use yt-dlp direct URL map")
+      .setDesc(
+        "When enabled, supported HTTP video page links use previously resolved yt-dlp direct URLs when the cached URL has not expired. Falls back when unavailable.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.directPlayback)
+          .onChange(async (value) => {
+            this.plugin.settings.directPlayback = value;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("yt-dlp executable path")
+      .setDesc(
+        "Desktop only. Used by the command 'Resolve direct URL with yt-dlp'. Example: yt-dlp or C:\\tools\\yt-dlp.exe.",
+      )
+      .addText((text) =>
+        text
+          .setPlaceholder("yt-dlp")
+          .setValue(this.plugin.settings.ytdlpPath || "yt-dlp")
+          .onChange(async (value) => {
+            this.plugin.settings.ytdlpPath = value.trim() || "yt-dlp";
             await this.plugin.saveSettings();
           }),
       );

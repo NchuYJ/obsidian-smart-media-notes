@@ -6,6 +6,7 @@ import {
   Modal,
   Notice,
   Plugin,
+  Platform,
   WorkspaceLeaf,
   MarkdownPostProcessorContext,
   normalizePath,
@@ -20,13 +21,16 @@ import {
   TimestampEntry,
 } from "./settings";
 import { VideoView, MediaLibraryView, VIDEO_VIEW, LIBRARY_VIEW } from "./view/VideoView";
+import { resolveBilibiliSource } from "./media/bilibiliResolver";
 import {
   formatSecondsAsTimestamp,
   parseTimestampToSeconds,
   parseSubtitleFile,
   urlToSafeName,
+  urlToReadableSubtitleName,
   normalizeMediaCandidate,
   isPlayableMedia,
+  isBilibiliUrl,
   MEDIA_EXTENSIONS,
   isAudioFile,
   setMediaFormats,
@@ -38,6 +42,9 @@ import {
   ResolvedMedia,
   MediaFileEntry,
   PodcastEpisode,
+  isYouTubeUrl,
+  toYouTubeWatchUrl,
+  toExternalTimestampUrl,
 } from "./utils";
 
 interface PlayerHandle {
@@ -65,10 +72,94 @@ interface VideoEphemeralState {
   playlist?: { files: TFile[]; currentIndex: number } | null;
   onNavigatePlaylist?: (file: TFile) => Promise<void>;
   isAudio?: boolean;
+  forceNativePlayer?: boolean;
 }
 
 interface PersistedSettingsData extends Partial<SmartMediaNotesSettings> {
   urlStartTimeMap?: Record<string, number>;
+  youtubeDirectPlayback?: boolean;
+  youtubeDlpPath?: string;
+}
+
+interface SubtitleIndexData {
+  version: number;
+  subtitleFileMap: Record<string, string>;
+}
+
+interface DirectUrlEntry {
+  originalUrl: string;
+  directUrl: string;
+  title?: string;
+  extractor?: string;
+  mediaKind?: "video" | "audio" | "hls";
+  resolvedAt: number;
+  expiresAt: number;
+  invalidatedAt?: number;
+  invalidReason?: string;
+}
+
+interface DirectUrlMapData {
+  version: number;
+  entries: Record<string, DirectUrlEntry>;
+}
+
+interface YtdlpFormat {
+  url?: string;
+  ext?: string;
+  protocol?: string;
+  format_id?: string;
+  format_note?: string;
+  vcodec?: string;
+  acodec?: string;
+  width?: number;
+  height?: number;
+  tbr?: number;
+  filesize?: number;
+  filesize_approx?: number;
+}
+
+interface YtdlpInfo {
+  url?: string;
+  title?: string;
+  extractor?: string;
+  ext?: string;
+  protocol?: string;
+  vcodec?: string;
+  acodec?: string;
+  width?: number;
+  height?: number;
+  requested_downloads?: YtdlpFormat[];
+  formats?: YtdlpFormat[];
+}
+
+interface DirectUrlCandidate {
+  url: string;
+  mediaKind: "video" | "audio" | "hls";
+}
+
+interface SubtitleReferenceIndex {
+  keys: Set<string>;
+  labelsByKey: Map<string, Set<string>>;
+}
+
+interface SubtitleLibraryItem {
+  path: string;
+  exists: boolean;
+  status: "linked" | "unused" | "missing";
+  mappedKeys: string[];
+  activeKeys: string[];
+  labels: string[];
+}
+
+interface TimestampNode {
+  time: string;
+  subhead: string;
+  label: string;
+  seconds: number;
+  mediaUrl?: string;
+  preview?: string;
+  previewStartLine?: number;
+  previewEndLine?: number;
 }
 
 interface NodeFileSystem {
@@ -85,6 +176,15 @@ interface NodePathModule {
   basename(path: string, suffix?: string): string;
 }
 
+interface NodeChildProcess {
+  execFile(
+    file: string,
+    args: string[],
+    options: { timeout?: number; maxBuffer?: number },
+    callback: (error: unknown, stdout: string, stderr: string) => void,
+  ): void;
+}
+
 const ERRORS: Record<string, string> = {
   INVALID_URL:
     "\n> [!error] Invalid Media URL\n> The highlighted link is not a valid video or audio url. Please try again with a valid link.\n",
@@ -96,13 +196,35 @@ const ERRORS: Record<string, string> = {
     "\n> [!warning] Voice Recording Unavailable\n> Your environment does not expose microphone recording APIs for this Obsidian window.\n",
 };
 
+function buildTimestampBlockFromSelection(selection: string): string | null {
+  const matches = selection
+    .replace(/\uFF1A/g, ":")
+    .match(/\b\d{1,2}:\d{1,2}(?::\d{1,2})?\b/g);
+  if (!matches?.length) return null;
+  const normalized = matches
+    .map((match) => parseTimestampToSeconds(match))
+    .filter((seconds): seconds is number => seconds != null)
+    .map((seconds) => formatSecondsAsTimestamp(seconds));
+  if (!normalized.length) return null;
+  return "```timestamp\n" + normalized.join("\n") + "\n```\n";
+}
+
 export default class SmartMediaNotesPlugin extends Plugin {
   settings!: SmartMediaNotesSettings;
   player: PlayerHandle | null = null;
   setPlaying: ((playing: boolean) => void) | null = null;
   currentUrl: string | null = null;
   currentUrlKey: string | null = null;
+  currentUrlCanSeek: boolean = false;
+  currentMediaAlias: string = "";
+  currentMediaSourceUrl: string = "";
+  currentMediaDisplayPath: string = "";
+  currentMediaVaultFile: TFile | null = null;
+  mobileTimestampRailEl: HTMLElement | null = null;
+  mobileTimestampRailView: MarkdownView | null = null;
+  mobileTimestampRailEditMode: boolean = false;
   currentSubtitle: SubtitleCue | null = null;
+  directUrlMap: Record<string, DirectUrlEntry> = {};
   editor: Editor | null = null;
   mediaRecorder: MediaRecorder | null = null;
   recordedChunks: Blob[] = [];
@@ -127,6 +249,14 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return mod as NodePathModule | null;
   }
 
+  private getNodeChildProcess(): NodeChildProcess | null {
+    const globalWithRequire = globalThis as typeof globalThis & {
+      require?: (id: string) => unknown;
+    };
+    const mod = globalWithRequire.require?.("child_process");
+    return mod as NodeChildProcess | null;
+  }
+
   async onload(): Promise<void> {
     this.registerView(VIDEO_VIEW, (leaf) => new VideoView(leaf));
     this.registerView(
@@ -140,9 +270,47 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "reconcile-saved-media",
       name: "Reconcile saved media collection",
+      icon: "refresh-cw",
       callback: async () => {
         await this.reconcileTimestampCollection();
         await this.refreshLibraryView();
+      },
+    });
+    this.addCommand({
+      id: "reconcile-subtitle-index",
+      name: "Reconcile synced subtitle index",
+      icon: "captions",
+      callback: async () => {
+        await this.reconcileSubtitleIndex();
+      },
+    });
+    this.addCommand({
+      id: "resolve-direct-url-with-ytdlp",
+      name: "Resolve direct URL with yt-dlp",
+      icon: "link",
+      editorCallback: async (editor: Editor) => {
+        const targetUrl = this.getTargetUrl(editor);
+        if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+          new Notice("Select or open an HTTP video page link first.");
+          return;
+        }
+        await this.resolveAndSaveDirectUrl(targetUrl);
+      },
+    });
+    this.addCommand({
+      id: "toggle-mobile-timestamp-rail",
+      name: "Toggle mobile timestamp rail",
+      icon: "panel-left-open",
+      callback: async () => {
+        await this.toggleMobileTimestampRail();
+      },
+    });
+    this.addCommand({
+      id: "toggle-mobile-timestamp-rail-edit-mode",
+      name: "Toggle mobile timestamp rail edit mode",
+      icon: "pencil",
+      callback: async () => {
+        await this.toggleMobileTimestampRailEditMode();
       },
     });
     this.addRibbonIcon("library", "Open Smart Media Library", () => {
@@ -153,29 +321,30 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.registerMarkdownCodeBlockProcessor(
       "timestamp",
       (source: string, el: HTMLElement) => {
-        const regExp = /\d+:\d+:\d+|\d+:\d+/g;
-        const rows = source.split("\n").filter((row) => row.length > 0);
-        rows.forEach((row) => {
-          const match = row.match(regExp);
-          if (match) {
-            const div = el.createEl("div");
-            const button = div.createEl("button", {
-              cls: "smn-dynamic-btn",
-            });
-            button.innerText = match[0];
-            button.style.setProperty(
-              "--smn-btn-bg",
-              this.settings.timestampColor,
-            );
-            button.style.setProperty(
-              "--smn-btn-color",
-              this.settings.timestampTextColor,
-            );
-            button.addEventListener("click", () => {
-              const seconds = parseTimestampToSeconds(match[0]);
-              if (this.player) this.player.seekTo(seconds);
-            });
-            div.appendChild(button);
+        const entries = this.extractTimestampEntriesFromSource(source);
+        entries.forEach((entry) => {
+          const div = el.createEl("div", { cls: "smn-timestamp-node" });
+          const button = div.createEl("button", {
+            cls: "smn-dynamic-btn smn-timestamp-node-btn",
+          });
+          this.renderTimestampButtonLabel(button, entry);
+          button.style.setProperty(
+            "--smn-btn-bg",
+            this.settings.timestampColor,
+          );
+          button.style.setProperty(
+            "--smn-btn-color",
+            this.settings.timestampTextColor,
+          );
+          div.appendChild(button);
+          button.addEventListener("click", () => this.seekToTimestamp(entry.seconds));
+          const externalUrl = toExternalTimestampUrl(
+            this.currentUrlKey || this.currentUrl || "",
+            entry.seconds,
+          );
+          if (externalUrl) {
+            button.title =
+              "Seek in player. On mobile platform links open externally at this timestamp.";
           }
         });
       },
@@ -212,6 +381,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
               resolved.playableUrl,
               this.editor,
               resolved.isVaultFile ? resolved.vaultFile : null,
+              {
+                alias,
+                sourceUrl: raw,
+                displayPath: resolved.displayPath,
+              },
             );
           });
           div.appendChild(button);
@@ -245,7 +419,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
             this.settings.urlTextColor,
           );
           button.addEventListener("click", () => {
-            void this.activateView(raw, this.editor);
+            void this.activateView(raw, this.editor, null, {
+              alias,
+              sourceUrl: raw,
+              displayPath: raw,
+            });
           });
           div.appendChild(button);
         } else {
@@ -419,6 +597,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "trigger-player",
       name: "Open media player (copy url or path and use hotkey)",
+      icon: "play-circle",
       editorCallback: async (editor: Editor) => {
         const selected = editor.getSelection().trim();
         const parsedSel = parseTimestampUrlBlock(selected);
@@ -430,6 +609,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
             resolved.playableUrl,
             editor,
             resolved.isVaultFile ? resolved.vaultFile : null,
+            {
+              alias: selectedAlias,
+              sourceUrl: selectedUrl,
+              displayPath: resolved.displayPath,
+            },
           );
           if (this.settings.noteTitle) {
             editor.replaceSelection(
@@ -452,7 +636,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
           void this.trackTimestamp(resolved.playableUrl, {
             displayPath: resolved.displayPath,
             sourceLabel: resolved.isVaultFile ? "Vault" : resolved.isSystemFile ? "System" : "URL",
-            title: resolved.displayPath.split("/").pop() || resolved.displayPath,
+            title:
+              selectedAlias ||
+              resolved.displayPath.split("/").pop()?.replace(/\.[^.]+$/, "") ||
+              resolved.displayPath,
           });
           void this.refreshLibraryView();
         } else if (this.isPodcastUrl(selectedUrl)) {
@@ -461,7 +648,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
         } else if (/^https?:\/\//i.test(selectedUrl)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
           // react-player 能自动识别并播放这些 URL
-          void this.activateView(selectedUrl, editor);
+          void this.activateView(selectedUrl, editor, null, {
+            alias: selectedAlias,
+            sourceUrl: selectedUrl,
+            displayPath: selectedUrl,
+          });
           if (this.settings.noteTitle) {
             editor.replaceSelection(
               "\n" + this.settings.noteTitle +
@@ -476,7 +667,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           await this.trackTimestamp(selectedUrl, {
             displayPath: selectedUrl,
             sourceLabel: "URL",
-            title: selectedAlias || selectedUrl,
+            title: selectedAlias || selectedUrl.split("/").pop()?.split("?")[0] || selectedUrl,
           });
           await this.refreshLibraryView();
         } else {
@@ -489,6 +680,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "timestamp-insert",
       name: "Insert timestamp based on videos current play time",
+      icon: "clock",
       editorCallback: (editor: Editor) => {
         if (!this.player) {
           editor.replaceSelection(ERRORS["NO_ACTIVE_VIDEO"]);
@@ -514,8 +706,24 @@ export default class SmartMediaNotesPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "timestamp-wrap-selection",
+      name: "Convert selected time text to timestamp block",
+      icon: "wand-sparkles",
+      editorCallback: (editor: Editor) => {
+        const selected = editor.getSelection();
+        const block = buildTimestampBlockFromSelection(selected);
+        if (!block) {
+          new Notice("Select a time like 1:23, 01:23, or 1:02:03 first.");
+          return;
+        }
+        editor.replaceSelection(block);
+      },
+    });
+
+    this.addCommand({
       id: "pause-player",
       name: "Pause player",
+      icon: "pause-circle",
       editorCallback: () => {
         if (this.player && this.setPlaying)
           this.setPlaying(!this.player.props.playing);
@@ -525,6 +733,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "seek-forward",
       name: "Seek Forward",
+      icon: "skip-forward",
       editorCallback: () => {
         if (this.player)
           this.player.seekTo(
@@ -537,6 +746,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "seek-backward",
       name: "Seek Backward",
+      icon: "skip-back",
       editorCallback: () => {
         if (this.player)
           this.player.seekTo(
@@ -549,6 +759,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "open-sample-modal-complex",
       name: "Open local media file",
+      icon: "folder-open",
       editorCallback: (editor: Editor) => {
         this.editor = editor;
         new LocalFileModal(this.app, this.activateView.bind(this), editor).open();
@@ -559,6 +770,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "open-vault-media",
       name: "Open media from vault",
+      icon: "folder-search",
       editorCallback: (editor: Editor) => {
         this.editor = editor;
         new VaultMediaModal(this.app, this).open();
@@ -569,6 +781,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "open-media-library",
       name: "Open media library sidebar",
+      icon: "library",
       callback: () => {
         void this.activateLibraryView();
       },
@@ -577,6 +790,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "import-subtitle-file",
       name: "Import subtitle file for current media",
+      icon: "captions",
       editorCallback: (editor: Editor) => {
         this.editor = editor;
         new SubtitleModal(this.app, this).open();
@@ -587,6 +801,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "insert-current-subtitle-note",
       name: "Insert current subtitle with timestamp",
+      icon: "message-square-plus",
       editorCallback: async (editor: Editor) => {
         this.editor = editor;
         if (!this.player) {
@@ -608,6 +823,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "start-voice-recording",
       name: "Start voice recording",
+      icon: "mic",
       editorCallback: async (editor: Editor) => {
         this.editor = editor;
         await this.startVoiceRecording();
@@ -617,6 +833,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "stop-voice-recording",
       name: "Stop voice recording and save note",
+      icon: "square",
       editorCallback: async (editor: Editor) => {
         this.editor = editor;
         await this.stopVoiceRecording(editor);
@@ -627,6 +844,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "toggle-dictation",
       name: "Toggle dictation mode",
+      icon: "ear",
       callback: () => {
         this.dictationMode = !this.dictationMode;
         if (!this.dictationMode) {
@@ -655,6 +873,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "dictation-reveal",
       name: "Reveal dictation answer (compare with selected text)",
+      icon: "eye",
       editorCallback: (editor: Editor) => {
         if (!this.dictationMode) {
           new Notice("Enable dictation mode first.");
@@ -681,6 +900,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "dictation-prev-segment",
       name: "Dictation: Previous segment",
+      icon: "step-back",
       callback: () => {
         if (!this.dictationMode || !this.player) return;
         const subs = this.settings.subtitleLibrary[this.currentUrlKey || ""] || [];
@@ -695,6 +915,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.addCommand({
       id: "dictation-next-segment",
       name: "Dictation: Next segment",
+      icon: "step-forward",
       callback: () => {
         if (!this.dictationMode || !this.player) return;
         const subs = this.settings.subtitleLibrary[this.currentUrlKey || ""] || [];
@@ -716,6 +937,11 @@ export default class SmartMediaNotesPlugin extends Plugin {
     this.setPlaying = null;
     this.currentUrl = null;
     this.currentUrlKey = null;
+    this.currentMediaAlias = "";
+    this.currentMediaSourceUrl = "";
+    this.currentMediaDisplayPath = "";
+    this.currentMediaVaultFile = null;
+    this.clearMobileTimestampRail();
     this.currentSubtitle = null;
     if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
       this.mediaRecorder.stop();
@@ -818,22 +1044,27 @@ export default class SmartMediaNotesPlugin extends Plugin {
     vaultFile?: TFile | null,
   ): Promise<SubtitleCue[]> {
     const stableKey = this.getStableSubtitleKey(url, vaultFile);
+    const aliasKeys = this.getSubtitleAliasKeys(url, vaultFile);
 
     // Try lookup by stable key first
-    const cached = this.settings.subtitleLibrary[stableKey];
-    if (cached && cached.length) return cached;
+    for (const key of aliasKeys) {
+      const cached = this.settings.subtitleLibrary[key];
+      if (cached && cached.length) {
+        this.settings.subtitleLibrary[stableKey] = cached;
+        return cached;
+      }
+    }
 
     // Fallback: try the raw url (backward compat)
     const legacyCached = this.settings.subtitleLibrary[url];
-    if (legacyCached && legacyCached.length) {
-      // Migrate to stable key (memory only, subtitleLibrary 不持久化)
-      this.settings.subtitleLibrary[stableKey] = legacyCached;
-      return legacyCached;
-    }
+    if (legacyCached && legacyCached.length) return legacyCached;
 
     // Try subtitleFileMap with both keys — 从 vault 文件加载
-    let mappedPath = this.settings.subtitleFileMap[stableKey]
-      || this.settings.subtitleFileMap[url];
+    let mappedPath = "";
+    for (const key of aliasKeys) {
+      mappedPath = this.settings.subtitleFileMap[key];
+      if (mappedPath) break;
+    }
     if (mappedPath) {
       try {
         if (await this.app.vault.adapter.exists(mappedPath)) {
@@ -852,18 +1083,78 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return [];
   }
 
+  getSubtitleAliasKeys(url: string, vaultFile?: TFile | null): string[] {
+    const keys = new Set<string>();
+    const add = (value?: string | null) => {
+      const normalized = normalizeMediaCandidate(value || "");
+      if (!normalized) return;
+      keys.add(normalized);
+      if (isYouTubeUrl(normalized)) keys.add(toYouTubeWatchUrl(normalized));
+    };
+    const addStable = (value?: string | null, file?: TFile | null) => {
+      if (!value && !file) return;
+      add(this.getStableSubtitleKey(value || "", file));
+    };
+    add(url);
+    addStable(url, vaultFile);
+    add(this.currentUrlKey);
+    add(this.currentUrl);
+    add(this.currentMediaSourceUrl);
+    add(this.currentMediaDisplayPath);
+    addStable(this.currentMediaSourceUrl);
+    addStable(this.currentMediaDisplayPath);
+    if (this.currentMediaVaultFile) {
+      addStable(url, this.currentMediaVaultFile);
+      addStable(this.currentMediaVaultFile.path, this.currentMediaVaultFile);
+    }
+    for (const [key, entry] of Object.entries(this.directUrlMap || {})) {
+      if (!entry?.directUrl) continue;
+      const directMatches =
+        entry.directUrl === url ||
+        entry.directUrl === this.currentUrl ||
+        entry.directUrl === this.currentMediaSourceUrl;
+      const originalMatches =
+        key === url ||
+        entry.originalUrl === url ||
+        key === this.currentUrlKey ||
+        entry.originalUrl === this.currentUrlKey;
+      if (directMatches || originalMatches) {
+        add(key);
+        add(entry.originalUrl);
+        add(entry.directUrl);
+      }
+    }
+    return [...keys];
+  }
+
   setCurrentSubtitle(subtitle: SubtitleCue | null): void {
     this.currentSubtitle = subtitle;
   }
 
   getTargetUrl(editor?: Editor): string | null {
     const selected = editor?.getSelection().trim() || "";
-    if (selected && isPlayableMedia(selected)) return selected;
     if (selected) {
+      const parsed = parseTimestampUrlBlock(selected);
+      if (parsed.url && (isPlayableMedia(parsed.url) || /^https?:\/\//i.test(parsed.url))) {
+        return parsed.url;
+      }
+      if (isPlayableMedia(selected)) return selected;
       const resolved = this.resolveMediaUrl(selected);
       if (resolved) return resolved.playableUrl;
     }
-    return this.currentUrlKey || this.currentUrl;
+    return this.currentMediaSourceUrl || this.currentUrlKey || this.currentUrl;
+  }
+
+  getTargetAlias(editor?: Editor): string {
+    const selected = editor?.getSelection().trim() || "";
+    if (selected) {
+      const parsed = parseTimestampUrlBlock(selected);
+      if (parsed.alias) return parsed.alias;
+    }
+    if (this.currentMediaAlias) return this.currentMediaAlias;
+    const activeFile = this.app.workspace.getActiveFile();
+    if (activeFile?.basename) return activeFile.basename;
+    return "";
   }
 
   // ---- URL resolution ----
@@ -922,21 +1213,688 @@ export default class SmartMediaNotesPlugin extends Plugin {
   }
 
   // ---- Subtitle import ----
+  getSubtitleStorageFolderCandidates(): string[] {
+    return [
+      this.settings.subtitleStorageFolder || "",
+      DEFAULT_SETTINGS.subtitleStorageFolder || "",
+      "Attachments/Subtitles",
+      "Subtitles",
+    ].filter((folder, index, folders) => folder && folders.indexOf(folder) === index)
+      .map((folder) => normalizePath(folder));
+  }
+
+  getVaultSyncFileCandidatePaths(fileName: string, folderPaths: string[]): string[] {
+    const candidates = new Set<string>();
+    folderPaths
+      .map((folder) => normalizePath(`${folder}/${fileName}`))
+      .forEach((path) => candidates.add(path));
+    this.app.vault.getFiles()
+      .filter((file) => file.name === fileName)
+      .forEach((file) => candidates.add(normalizePath(file.path)));
+    return [...candidates];
+  }
+
+  getSubtitleIndexPath(): string {
+    return normalizePath(`${this.settings.subtitleStorageFolder || "Subtitles"}/smart-media-notes-subtitles.json`);
+  }
+
+  getSubtitleIndexCandidatePaths(): string[] {
+    return this.getVaultSyncFileCandidatePaths(
+      "smart-media-notes-subtitles.json",
+      this.getSubtitleStorageFolderCandidates(),
+    );
+  }
+
+  async loadSubtitleIndexFromVault(): Promise<void> {
+    for (const indexPath of this.getSubtitleIndexCandidatePaths()) {
+      try {
+        if (!(await this.app.vault.adapter.exists(indexPath))) continue;
+        const raw = await this.app.vault.adapter.read(indexPath);
+        const data = JSON.parse(raw) as Partial<SubtitleIndexData>;
+        if (!data.subtitleFileMap || typeof data.subtitleFileMap !== "object") continue;
+        this.settings.subtitleFileMap = {
+          ...data.subtitleFileMap,
+          ...(this.settings.subtitleFileMap || {}),
+        };
+      } catch {
+        // Ignore invalid sync index files and continue with local mappings.
+      }
+    }
+  }
+
+  async saveSubtitleIndexToVault(): Promise<void> {
+    const data: SubtitleIndexData = {
+      version: 1,
+      subtitleFileMap: this.settings.subtitleFileMap || {},
+    };
+    const serialized = JSON.stringify(data, null, 2);
+    const candidatePaths = this.getSubtitleIndexCandidatePaths();
+    const primaryFolder = await this.ensureFolder(this.settings.subtitleStorageFolder);
+    const primaryPath = normalizePath(`${primaryFolder}/smart-media-notes-subtitles.json`);
+
+    await this.app.vault.adapter.write(primaryPath, serialized);
+
+    for (const indexPath of candidatePaths) {
+      if (indexPath === primaryPath) continue;
+      if (await this.app.vault.adapter.exists(indexPath)) {
+        await this.app.vault.adapter.write(indexPath, serialized);
+      }
+    }
+  }
+
+  getDirectUrlMapPath(): string {
+    return normalizePath(`${this.settings.subtitleStorageFolder || "Subtitles"}/smart-media-notes-direct-url-map.json`);
+  }
+
+  getDirectUrlMapCandidatePaths(): string[] {
+    return this.getVaultSyncFileCandidatePaths(
+      "smart-media-notes-direct-url-map.json",
+      this.getSubtitleStorageFolderCandidates(),
+    );
+  }
+
+  getDirectUrlKey(url: string): string {
+    return isYouTubeUrl(url) ? toYouTubeWatchUrl(url) : normalizeMediaCandidate(url);
+  }
+
+  async cleanupLegacyDirectUrlFiles(): Promise<void> {
+    const legacyPaths = this.getVaultSyncFileCandidatePaths(
+      "smart-media-notes-youtube-direct.json",
+      this.getSubtitleStorageFolderCandidates(),
+    );
+    for (const legacyPath of legacyPaths) {
+      try {
+        if (await this.app.vault.adapter.exists(legacyPath)) {
+          await this.app.vault.adapter.remove(legacyPath);
+        }
+      } catch {
+        // Ignore cleanup failures and keep the new unified map working.
+      }
+    }
+  }
+
+  private isDirectEntryInvalid(entry?: DirectUrlEntry | null): boolean {
+    return !!entry?.invalidatedAt;
+  }
+
+  private getDirectEntryRank(sourceKey: string, entry?: DirectUrlEntry | null): number {
+    if (!entry?.directUrl) return -100;
+    if (this.isDirectEntryInvalid(entry)) return -50;
+    if (this.isUnsupportedDirectUrlForSource(sourceKey, entry.directUrl)) return -20;
+    if (this.isAudioOnlyDirectEntry(entry)) return -10;
+
+    let score = 0;
+    if (entry.mediaKind === "video") score += 50;
+    if (entry.mediaKind === "hls") score += 10;
+    if (entry.mediaKind === "audio") score -= 10;
+
+    if (!this.isLikelyHlsDirectUrl(entry.directUrl)) score += 20;
+    if (/mime=video%2F|mime=video\//i.test(entry.directUrl)) score += 15;
+    if (/\.(mp4|webm|mkv|mov)(?:[/?#]|$)/i.test(entry.directUrl)) score += 10;
+    if (/\b(vcodec|itag|clen|dur)=/i.test(entry.directUrl)) score += 5;
+
+    return score;
+  }
+
+  private pickBetterDirectUrlEntry(
+    sourceKey: string,
+    current?: DirectUrlEntry | null,
+    incoming?: DirectUrlEntry | null,
+  ): DirectUrlEntry | null {
+    if (!incoming?.directUrl) return current || null;
+    if (!current?.directUrl) return incoming;
+
+    const currentRank = this.getDirectEntryRank(sourceKey, current);
+    const incomingRank = this.getDirectEntryRank(sourceKey, incoming);
+    if (incomingRank !== currentRank) {
+      return incomingRank > currentRank ? incoming : current;
+    }
+
+    const currentResolvedAt = current.resolvedAt || 0;
+    const incomingResolvedAt = incoming.resolvedAt || 0;
+    if (incomingResolvedAt !== currentResolvedAt) {
+      return incomingResolvedAt > currentResolvedAt ? incoming : current;
+    }
+
+    const currentExpiresAt = current.expiresAt || 0;
+    const incomingExpiresAt = incoming.expiresAt || 0;
+    if (incomingExpiresAt !== currentExpiresAt) {
+      return incomingExpiresAt > currentExpiresAt ? incoming : current;
+    }
+
+    return current;
+  }
+
+  async loadDirectUrlMapFromVault(): Promise<void> {
+    try {
+      const nextMap: Record<string, DirectUrlEntry> = {};
+      let shouldResave = false;
+      for (const mapPath of this.getDirectUrlMapCandidatePaths()) {
+        if (!(await this.app.vault.adapter.exists(mapPath))) continue;
+        const raw = await this.app.vault.adapter.read(mapPath);
+        const data = JSON.parse(raw) as Partial<DirectUrlMapData>;
+        if (data.entries && typeof data.entries === "object") {
+          Object.entries(data.entries).forEach(([key, entry]) => {
+            const best = this.pickBetterDirectUrlEntry(key, nextMap[key], entry);
+            if (best && best !== nextMap[key]) nextMap[key] = best;
+          });
+        }
+      }
+      Object.entries(this.directUrlMap).forEach(([key, entry]) => {
+        const best = this.pickBetterDirectUrlEntry(key, nextMap[key], entry);
+        if (best && best !== nextMap[key]) nextMap[key] = best;
+      });
+      shouldResave = this.getDirectUrlMapCandidatePaths().length > 1;
+      this.directUrlMap = nextMap;
+      if (shouldResave && Object.keys(nextMap).length) {
+        await this.saveDirectUrlMapToVault();
+      }
+      await this.cleanupLegacyDirectUrlFiles();
+    } catch {
+      this.directUrlMap = {};
+    }
+  }
+
+  async saveDirectUrlMapToVault(): Promise<void> {
+    const folder = await this.ensureFolder(this.settings.subtitleStorageFolder);
+    const mapPath = normalizePath(`${folder}/smart-media-notes-direct-url-map.json`);
+    const data: DirectUrlMapData = {
+      version: 1,
+      entries: this.directUrlMap,
+    };
+    const serialized = JSON.stringify(data, null, 2);
+    const candidatePaths = this.getDirectUrlMapCandidatePaths();
+
+    await this.app.vault.adapter.write(mapPath, serialized);
+
+    for (const candidatePath of candidatePaths) {
+      if (candidatePath === mapPath) continue;
+      if (await this.app.vault.adapter.exists(candidatePath)) {
+        await this.app.vault.adapter.write(candidatePath, serialized);
+      }
+    }
+
+    await this.cleanupLegacyDirectUrlFiles();
+  }
+
+  getDirectUrlExpiry(directUrl: string): number {
+    try {
+      const expire = new URL(directUrl).searchParams.get("expire");
+      const seconds = expire ? Number(expire) : 0;
+      if (seconds > 0) return Math.max(Date.now(), seconds * 1000 - 5 * 60 * 1000);
+    } catch {
+      // Fall through to a conservative default.
+    }
+    return Date.now() + 6 * 60 * 60 * 1000;
+  }
+
+  private isLikelyHlsDirectUrl(value?: string): boolean {
+    if (!value) return false;
+    return /\.m3u8(?:[/?#]|$)/i.test(value) ||
+      /\/manifest\/hls_|\/hls_playlist\/|playlist\/index\.m3u8/i.test(value);
+  }
+
+  private isUnsupportedDirectUrlForSource(sourceUrl: string, directUrl: string): boolean {
+    // YouTube HLS manifests do not allow app://obsidian.md CORS access.
+    // Only progressive single-file URLs are useful for YouTube direct playback.
+    return isYouTubeUrl(sourceUrl) && this.isLikelyHlsDirectUrl(directUrl);
+  }
+
+  private isLikelyAudioDirectUrl(value?: string): boolean {
+    if (!value) return false;
+    return /\.(m4a|mp3|aac|ogg|oga|opus|wav|flac)(?:[/?#]|$)/i.test(value);
+  }
+
+  private isAudioOnlyDirectEntry(entry: DirectUrlEntry): boolean {
+    return entry.mediaKind === "audio" ||
+      (!entry.mediaKind && this.isLikelyAudioDirectUrl(entry.directUrl));
+  }
+
+  private getDirectUrlEntry(url: string, ...aliases: Array<string | null | undefined>): DirectUrlEntry | null {
+    const keys = this.getDirectUrlLookupKeys(url, ...aliases);
+    return keys.map((key) => this.directUrlMap[key]).find((item) => item?.directUrl) || null;
+  }
+
+  async invalidateDirectUrl(
+    url: string,
+    aliases: Array<string | null | undefined> = [],
+    reason?: string,
+  ): Promise<void> {
+    const keys = this.getDirectUrlLookupKeys(url, ...aliases);
+    let changed = false;
+    keys.forEach((key) => {
+      const entry = this.directUrlMap[key];
+      if (!entry?.directUrl) return;
+      entry.invalidatedAt = Date.now();
+      entry.invalidReason = reason || "Playback failed in this Obsidian environment.";
+      changed = true;
+    });
+    if (changed) await this.saveDirectUrlMapToVault();
+  }
+
+  getDirectUrlLookupKeys(...urls: Array<string | null | undefined>): string[] {
+    const keys = new Set<string>();
+    urls.forEach((url) => {
+      const normalized = normalizeMediaCandidate(url || "");
+      if (!normalized) return;
+      keys.add(normalized);
+      keys.add(this.getDirectUrlKey(normalized));
+      if (isYouTubeUrl(normalized)) keys.add(toYouTubeWatchUrl(normalized));
+    });
+    return [...keys];
+  }
+
+  getValidDirectUrl(url: string, ...aliases: Array<string | null | undefined>): string {
+    const entry = this.getDirectUrlEntry(url, ...aliases);
+    if (!entry?.directUrl) return "";
+    if (this.isUnsupportedDirectUrlForSource(url, entry.directUrl)) return "";
+    if (this.isAudioOnlyDirectEntry(entry) && !isAudioFile(url)) return "";
+    if (entry.invalidatedAt) return "";
+    return entry.directUrl;
+  }
+
+  getDirectUrlStatus(url: string, ...aliases: Array<string | null | undefined>): { state: "ready" | "expired" | "missing"; label: string } {
+    const entry = this.getDirectUrlEntry(url, ...aliases);
+    if (!entry?.directUrl) return { state: "missing", label: "Direct URL not resolved" };
+    if (this.isUnsupportedDirectUrlForSource(url, entry.directUrl)) {
+      return {
+        state: "expired",
+        label: "Cached direct URL is YouTube HLS and cannot play in Obsidian",
+      };
+    }
+    if (this.isAudioOnlyDirectEntry(entry) && !isAudioFile(url)) {
+      return {
+        state: "expired",
+        label: "Cached direct URL is audio-only; refresh to resolve a video stream",
+      };
+    }
+    if (entry.invalidatedAt) {
+      return {
+        state: "expired",
+        label: entry.invalidReason || "Direct URL marked invalid after playback failure",
+      };
+    }
+    return { state: "ready", label: "Direct URL ready" };
+  }
+
+  private isBrowserPlayableDirectUrl(value: string | undefined, sourceUrl: string): boolean {
+    if (!value || !/^https?:\/\//i.test(value)) return false;
+    if (this.isUnsupportedDirectUrlForSource(sourceUrl, value)) return false;
+    return true;
+  }
+
+  private scoreYtdlpFormat(format: YtdlpFormat, sourceUrl: string): number {
+    const url = format.url || "";
+    if (!this.isBrowserPlayableDirectUrl(url, sourceUrl)) return -1;
+    const ext = (format.ext || "").toLowerCase();
+    const protocol = (format.protocol || "").toLowerCase();
+    const hasVideo = Boolean(format.vcodec && format.vcodec !== "none");
+    const hasAudio = Boolean(format.acodec && format.acodec !== "none");
+    const hasVideoEvidence =
+      hasVideo ||
+      Boolean(format.width) ||
+      Boolean(format.height) ||
+      /\.(mp4|m4v|webm|mov|m3u8)(?:[/?#]|$)/i.test(url) ||
+      protocol.includes("m3u8");
+    const hasAudioEvidence =
+      hasAudio ||
+      this.isLikelyAudioDirectUrl(url) ||
+      ext === "m4a" ||
+      ext === "mp3";
+    if (!isAudioFile(sourceUrl) && !hasVideoEvidence) return -1;
+    if (!isAudioFile(sourceUrl) && hasAudioEvidence && !hasVideoEvidence) return -1;
+    if (format.vcodec && format.acodec && (!hasVideo || !hasAudio)) return -1;
+    if (isYouTubeUrl(sourceUrl) && (protocol.includes("m3u8") || ext === "m3u8")) {
+      return -1;
+    }
+    const height = format.height || 0;
+    const bitrate = format.tbr || 0;
+    const hasKnownContainer =
+      ["mp4", "m4v", "webm", "mov", "m3u8"].includes(ext) ||
+      /\.(mp4|m4v|webm|mov|m3u8)(?:[/?#]|$)/i.test(url) ||
+      protocol.includes("m3u8") ||
+      protocol === "https" ||
+      protocol === "http";
+    let score = 0;
+    if (!hasKnownContainer) score -= 300;
+    if (hasVideo && hasAudio) score += 1000;
+    if (hasVideo && !hasAudio) score -= 800;
+    if (!hasVideo && hasAudio) score -= 900;
+    if (ext === "mp4" || ext === "m4v") score += 500;
+    if (ext === "webm") score += 260;
+    if (ext === "m3u8") score += 230;
+    if (protocol.includes("m3u8") || /\.m3u8(?:[/?#]|$)/i.test(url)) score += 210;
+    if (protocol.includes("dash") || ext === "mpd") score -= 600;
+    if (height) score += Math.min(height, 1080);
+    if (bitrate) score += Math.min(bitrate, 4000) / 10;
+    return score;
+  }
+
+  private getYtdlpMediaKind(format: YtdlpFormat): "video" | "audio" | "hls" {
+    const url = format.url || "";
+    const ext = (format.ext || "").toLowerCase();
+    const protocol = (format.protocol || "").toLowerCase();
+    if (protocol.includes("m3u8") || ext === "m3u8" || this.isLikelyHlsDirectUrl(url)) {
+      return "hls";
+    }
+    if (
+      format.vcodec === "none" ||
+      (!format.vcodec && !format.width && !format.height && this.isLikelyAudioDirectUrl(url))
+    ) {
+      return "audio";
+    }
+    return "video";
+  }
+
+  private pickBrowserPlayableDirectUrl(info: YtdlpInfo, sourceUrl: string): DirectUrlCandidate | null {
+    const directCandidates: YtdlpFormat[] = [
+      {
+        url: info.url,
+        ext: info.ext,
+        protocol: info.protocol,
+        vcodec: info.vcodec,
+        acodec: info.acodec,
+        width: info.width,
+        height: info.height,
+      },
+      ...(info.requested_downloads || []),
+      ...(info.formats || []),
+    ].filter((item) => Boolean(item.url));
+    const ranked = directCandidates
+      .map((format) => ({ format, score: this.scoreYtdlpFormat(format, sourceUrl) }))
+      .filter((item) => item.score >= 0)
+      .sort((a, b) => b.score - a.score);
+    const best = ranked[0]?.format;
+    if (!best?.url) return null;
+    return {
+      url: best.url,
+      mediaKind: this.getYtdlpMediaKind(best),
+    };
+  }
+
+  private async runYtdlpJson(
+    childProcess: NodeChildProcess,
+    executable: string,
+    args: string[],
+  ): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      childProcess.execFile(
+        executable,
+        args,
+        { timeout: 60000, maxBuffer: 30 * 1024 * 1024 },
+        (error, out, err) => {
+          if (error) {
+            reject(new Error(err || String(error)));
+            return;
+          }
+          resolve(out);
+        },
+      );
+    });
+  }
+
+  private isYtdlpFormatUnavailable(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /requested format is not available|format not available|no video formats found/i.test(message);
+  }
+
+  async resolveAndSaveDirectUrl(url: string): Promise<void> {
+    if (Platform.isMobileApp) {
+      new Notice("yt-dlp direct URL resolving is only available on desktop.");
+      return;
+    }
+    const childProcess = this.getNodeChildProcess();
+    if (!childProcess?.execFile) {
+      new Notice("Node child_process is unavailable in this Obsidian environment.");
+      return;
+    }
+    const executable = this.settings.ytdlpPath || "yt-dlp";
+    const baseArgs = [
+      "--dump-single-json",
+      "--no-playlist",
+      "--no-warnings",
+    ];
+    const args = [
+      ...baseArgs,
+      "-f",
+      isYouTubeUrl(url)
+        ? "best[protocol=https][ext=mp4][vcodec!=none][acodec!=none]/best[protocol=http][ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]"
+        : "best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]/best[protocol*=m3u8][vcodec!=none]/best[vcodec!=none]",
+      url,
+    ];
+    new Notice("Resolving direct URL with yt-dlp...");
+    let stdout = "";
+    try {
+      stdout = await this.runYtdlpJson(childProcess, executable, args);
+    } catch (error) {
+      if (!this.isYtdlpFormatUnavailable(error)) {
+        new Notice(`yt-dlp failed: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      new Notice("Requested yt-dlp format was unavailable. Retrying with automatic format discovery...");
+      try {
+        stdout = await this.runYtdlpJson(childProcess, executable, [...baseArgs, url]);
+      } catch (fallbackError) {
+        new Notice(`yt-dlp failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+        return;
+      }
+    }
+    if (!stdout) return;
+    try {
+      const info = JSON.parse(stdout) as YtdlpInfo;
+      const directCandidate = this.pickBrowserPlayableDirectUrl(info, url);
+      if (!directCandidate) {
+        const message = isYouTubeUrl(url)
+          ? "yt-dlp resolved this YouTube link, but only found HLS or separated streams. YouTube HLS is blocked by CORS in Obsidian; keep using iframe/external playback for this video."
+          : "yt-dlp resolved this page, but did not find a browser-playable video URL. This site may expose audio-only, separated audio/video streams, headers, or cookies.";
+        new Notice(message);
+        return;
+      }
+      const key = this.getDirectUrlKey(url);
+      this.directUrlMap[key] = {
+        originalUrl: key,
+        directUrl: directCandidate.url,
+        title: info.title,
+        extractor: info.extractor,
+        mediaKind: directCandidate.mediaKind,
+        resolvedAt: Date.now(),
+        expiresAt: this.getDirectUrlExpiry(directCandidate.url),
+      };
+      await this.saveDirectUrlMapToVault();
+      new Notice("Direct URL saved to the vault sync map.");
+    } catch (error) {
+      new Notice(`Could not parse yt-dlp output: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  collectSubtitleKeysForMedia(rawUrl: string): string[] {
+    const keys = new Set<string>();
+    const add = (value?: string | null) => {
+      if (value) keys.add(value);
+    };
+    this.getSubtitleAliasKeys(rawUrl).forEach((key) => add(key));
+    const resolved = this.resolveMediaUrl(rawUrl);
+    if (resolved) {
+      add(resolved.displayPath);
+      add(resolved.playableUrl);
+      add(this.getStableSubtitleKey(resolved.playableUrl, resolved.vaultFile || null));
+      add(this.getStableSubtitleKey(resolved.displayPath, resolved.vaultFile || null));
+    }
+    return [...keys];
+  }
+
+  getSubtitlePathForMedia(rawUrl: string): string {
+    const map = this.settings.subtitleFileMap || {};
+    for (const key of this.collectSubtitleKeysForMedia(rawUrl)) {
+      if (map[key]) return map[key];
+    }
+    return "";
+  }
+
+  private async collectSubtitleReferenceIndex(): Promise<SubtitleReferenceIndex> {
+    const keys = new Set<string>();
+    const labelsByKey = new Map<string, Set<string>>();
+    const addMedia = (rawUrl: string, label?: string) => {
+      if (!rawUrl) return;
+      const resolved = this.resolveMediaUrl(rawUrl);
+      const displayLabel =
+        label ||
+        resolved?.displayPath?.split("/").pop()?.replace(/\.[^.]+$/, "") ||
+        rawUrl;
+      this.collectSubtitleKeysForMedia(rawUrl).forEach((key) => {
+        keys.add(key);
+        if (!labelsByKey.has(key)) labelsByKey.set(key, new Set<string>());
+        labelsByKey.get(key)?.add(displayLabel);
+      });
+    };
+
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      try {
+        const content = await this.app.vault.read(file);
+        const regex = /```timestamp-url\n([\s\S]*?)\n```/g;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(content)) !== null) {
+          const parsed = parseTimestampUrlBlock(match[1].trim());
+          addMedia(parsed.url, parsed.alias || file.basename);
+        }
+      } catch {
+        // Ignore unreadable notes.
+      }
+    }
+
+    for (const entry of this.settings.timestampCollection || []) {
+      addMedia(entry.displayPath || entry.url, entry.title || entry.displayPath || entry.url);
+      addMedia(entry.url, entry.title || entry.displayPath || entry.url);
+    }
+
+    return { keys, labelsByKey };
+  }
+
+  async getSubtitleLibraryItems(): Promise<SubtitleLibraryItem[]> {
+    await this.loadSubtitleIndexFromVault();
+    const referenceIndex = await this.collectSubtitleReferenceIndex();
+    const pathToKeys = new Map<string, Set<string>>();
+    const allPaths = new Set<string>();
+
+    for (const [key, path] of Object.entries(this.settings.subtitleFileMap || {})) {
+      if (!path) continue;
+      const normalized = normalizePath(path);
+      allPaths.add(normalized);
+      if (!pathToKeys.has(normalized)) pathToKeys.set(normalized, new Set<string>());
+      pathToKeys.get(normalized)?.add(key);
+    }
+
+    const folders = this.getSubtitleStorageFolderCandidates();
+    for (const file of this.app.vault.getFiles()) {
+      const ext = file.extension.toLowerCase();
+      if (ext !== "srt" && ext !== "vtt") continue;
+      const inSubtitleFolder = folders.some((folder) =>
+        file.path === folder || file.path.startsWith(folder + "/"),
+      );
+      if (inSubtitleFolder) allPaths.add(file.path);
+    }
+
+    const items: SubtitleLibraryItem[] = [];
+    for (const path of [...allPaths].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+      const mappedKeys = [...(pathToKeys.get(path) || new Set<string>())];
+      const exists = await this.app.vault.adapter.exists(path);
+      const activeKeys = mappedKeys.filter((key) => referenceIndex.keys.has(key));
+      const labels = [...new Set(activeKeys.flatMap((key) => [...(referenceIndex.labelsByKey.get(key) || [])]))];
+      const status: SubtitleLibraryItem["status"] = exists
+        ? activeKeys.length
+          ? "linked"
+          : "unused"
+        : "missing";
+      items.push({ path, exists, status, mappedKeys, activeKeys, labels });
+    }
+    return items;
+  }
+
+  async deleteSubtitleLibraryItem(path: string): Promise<void> {
+    const normalized = normalizePath(path);
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (file) {
+      await this.app.vault.delete(file, true);
+    } else if (await this.app.vault.adapter.exists(normalized)) {
+      await this.app.vault.adapter.remove(normalized);
+    }
+
+    for (const [key, mappedPath] of Object.entries(this.settings.subtitleFileMap || {})) {
+      if (normalizePath(mappedPath) === normalized) delete this.settings.subtitleFileMap[key];
+    }
+    this.settings.subtitleLibrary = {};
+    await this.saveSubtitleIndexToVault();
+    await this.saveSettings();
+  }
+
+  async reconcileSubtitleIndex(): Promise<void> {
+    await this.loadSubtitleIndexFromVault();
+    const referenceIndex = await this.collectSubtitleReferenceIndex();
+
+    const nextMap: Record<string, string> = {};
+    let kept = 0;
+    let removed = 0;
+    for (const [key, path] of Object.entries(this.settings.subtitleFileMap || {})) {
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists && referenceIndex.keys.has(key)) {
+        nextMap[key] = path;
+        kept++;
+      } else {
+        removed++;
+      }
+    }
+    this.settings.subtitleFileMap = nextMap;
+    this.settings.subtitleLibrary = {};
+    await this.saveSubtitleIndexToVault();
+    await this.saveSettings();
+    new Notice(`Subtitle index reconciled: ${kept} mappings kept, ${removed} stale mappings removed.`);
+  }
+
   async importSubtitlesForUrl(url: string, file: File): Promise<void> {
+    return this.importSubtitlesForMedia(url, file);
+  }
+
+  async importSubtitlesForMedia(
+    url: string,
+    file: File,
+    mediaContext?: {
+      alias?: string;
+      sourceUrl?: string;
+      displayPath?: string;
+      vaultFile?: TFile | null;
+    },
+  ): Promise<void> {
     const content = await file.text();
     const cues = parseSubtitleFile(content, file.name);
     if (!cues.length) {
       new Notice("No subtitle cues were detected in that file.");
       return;
     }
-    const stableKey = this.getStableSubtitleKey(url);
+    const contextVaultFile = mediaContext?.vaultFile ?? this.currentMediaVaultFile;
+    const sourceUrl = mediaContext?.sourceUrl || this.currentMediaSourceUrl || "";
+    const displayPath = mediaContext?.displayPath || this.currentMediaDisplayPath || "";
+    const stableKey = this.getStableSubtitleKey(url, contextVaultFile);
     this.settings.subtitleLibrary[stableKey] = cues;
+    const aliasKeys = [
+      ...this.getSubtitleAliasKeys(url, contextVaultFile),
+      ...this.getSubtitleAliasKeys(sourceUrl, contextVaultFile),
+      ...this.getSubtitleAliasKeys(displayPath, contextVaultFile),
+    ].filter((key, index, keys) => key && key !== stableKey && keys.indexOf(key) === index);
+    aliasKeys.forEach((key) => {
+      this.settings.subtitleLibrary[key] = cues;
+    });
     const folder = await this.ensureFolder(this.settings.subtitleStorageFolder);
-    const safeName = urlToSafeName(stableKey);
+    const alias = mediaContext?.alias || this.getTargetAlias(this.editor || undefined);
+    const readableTarget = alias || displayPath || sourceUrl || stableKey;
+    const safeName = urlToReadableSubtitleName(readableTarget, file.name, stableKey);
     const ext = file.name.toLowerCase().endsWith(".vtt") ? ".vtt" : ".srt";
     const subtitlePath = normalizePath(`${folder}/${safeName}${ext}`);
     await this.app.vault.adapter.write(subtitlePath, content);
     this.settings.subtitleFileMap[stableKey] = subtitlePath;
+    aliasKeys.forEach((key) => {
+      this.settings.subtitleFileMap[key] = subtitlePath;
+    });
+    await this.saveSubtitleIndexToVault();
     await this.saveSettings();
     // Update all open video views with the new subtitles
     const leaves = this.app.workspace.getLeavesOfType(VIDEO_VIEW);
@@ -1167,6 +2125,390 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return this.editor;
   }
 
+  getMarkdownViewForEditor(editor: Editor | null): MarkdownView | null {
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    for (const leaf of leaves) {
+      if (leaf.view instanceof MarkdownView && (!editor || leaf.view.editor === editor)) {
+        return leaf.view;
+      }
+    }
+    return this.app.workspace.getActiveViewOfType(MarkdownView);
+  }
+
+  seekToTimestamp(seconds: number): void {
+    const fallbackUrl = toExternalTimestampUrl(
+      this.currentUrlKey || this.currentUrl || "",
+      seconds,
+    );
+    if (fallbackUrl && Platform.isMobileApp) {
+      if (this.currentUrlCanSeek && this.player) {
+        this.player.seekTo(seconds);
+      } else {
+        window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    if (this.player) this.player.seekTo(seconds);
+    else if (fallbackUrl) window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+  }
+
+  getTimestampLabel(entry: { time: string; subhead?: string }): string {
+    const mode = this.settings.timestampDisplayMode || "time-subhead";
+    const subhead = entry.subhead?.trim() || "";
+    if (mode === "subhead" && subhead) return subhead;
+    if (mode === "time") return entry.time;
+    return subhead ? `${entry.time} ${subhead}` : entry.time;
+  }
+
+  renderTimestampButtonLabel(button: HTMLElement, entry: TimestampNode): void {
+    button.empty();
+    const mode = this.settings.timestampDisplayMode || "time-subhead";
+    const hasSubhead = Boolean(entry.subhead);
+    if (mode === "subhead" && hasSubhead) {
+      button.createSpan({ cls: "smn-timestamp-subhead", text: entry.subhead });
+      return;
+    }
+    button.createSpan({ cls: "smn-timestamp-time", text: entry.time });
+    if (mode !== "time" && hasSubhead) {
+      button.createSpan({ cls: "smn-timestamp-subhead", text: entry.subhead });
+    }
+  }
+
+  extractTimestampEntriesFromSource(source: string): TimestampNode[] {
+    const entries: TimestampNode[] = [];
+    let currentSubhead = "";
+    const lines = source.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const subheadMatch = trimmed.match(/^#{1,6}\s*(.+)$/);
+      if (subheadMatch) {
+        currentSubhead = subheadMatch[1].trim();
+        continue;
+      }
+      const timeRegex = /\b\d{1,2}:\d{1,2}(?::\d{1,2})?\b/g;
+      let timeMatch: RegExpExecArray | null;
+      while ((timeMatch = timeRegex.exec(line)) !== null) {
+        const seconds = parseTimestampToSeconds(timeMatch[0]);
+        if (seconds == null) continue;
+        const time = formatSecondsAsTimestamp(seconds);
+        const node: TimestampNode = {
+          time,
+          subhead: currentSubhead,
+          label: "",
+          seconds,
+        };
+        node.label = this.getTimestampLabel(node);
+        entries.push(node);
+      }
+    }
+    return entries;
+  }
+
+  getTimestampPreviewRange(content: string, seconds: number): {
+    text: string;
+    startLine: number;
+    endLine: number;
+  } | null {
+    const lines = content.split("\n");
+    const time = formatSecondsAsTimestamp(seconds);
+    const compactTime = time.replace(/^00:/, "");
+    const index = lines.findIndex((line) =>
+      line.includes(time) || line.includes(compactTime),
+    );
+    if (index < 0) return null;
+    const start = Math.max(0, index - 2);
+    const end = Math.min(lines.length, index + 5);
+    const text = lines
+      .slice(start, end)
+      .join("\n")
+      .slice(0, 700);
+    return { text, startLine: start, endLine: end };
+  }
+
+  extractTimestampEntries(content: string): TimestampNode[] {
+    const entries: TimestampNode[] = [];
+    const blockRegex = /```timestamp\s*\n([\s\S]*?)```/g;
+    let blockMatch: RegExpExecArray | null;
+    while ((blockMatch = blockRegex.exec(content)) !== null) {
+      const nodes = this.extractTimestampEntriesFromSource(blockMatch[1]);
+      nodes.forEach((node) => {
+        const preview = this.getTimestampPreviewRange(content, node.seconds);
+        if (preview) {
+          node.preview = preview.text;
+          node.previewStartLine = preview.startLine;
+          node.previewEndLine = preview.endLine;
+        }
+      });
+      entries.push(...nodes);
+    }
+    return entries;
+  }
+
+  extractTimestampEntriesByMedia(content: string): TimestampNode[] {
+    const entries: TimestampNode[] = [];
+    const blockRegex = /```(timestamp-url|timestamp)\s*\n([\s\S]*?)```/g;
+    let currentMediaUrl = "";
+    let blockMatch: RegExpExecArray | null;
+    while ((blockMatch = blockRegex.exec(content)) !== null) {
+      if (blockMatch[1] === "timestamp-url") {
+        currentMediaUrl = parseTimestampUrlBlock(blockMatch[2].trim()).url;
+        continue;
+      }
+      const nodes = this.extractTimestampEntriesFromSource(blockMatch[2]);
+      nodes.forEach((node) => {
+        node.mediaUrl = currentMediaUrl;
+        entries.push(node);
+      });
+    }
+    return entries;
+  }
+
+  getTimestampMediaMatchKeys(rawUrl?: string | null): string[] {
+    const keys = new Set<string>();
+    const add = (value?: string | null) => {
+      const normalized = normalizeMediaCandidate(value || "");
+      if (!normalized) return;
+      keys.add(normalized);
+      keys.add(this.getStableSubtitleKey(normalized));
+      keys.add(this.getDirectUrlKey(normalized));
+      if (isYouTubeUrl(normalized)) keys.add(toYouTubeWatchUrl(normalized));
+    };
+    add(rawUrl);
+    const resolved = rawUrl ? this.resolveMediaUrl(rawUrl) : null;
+    if (resolved) {
+      add(resolved.displayPath);
+      add(resolved.playableUrl);
+      add(this.getStableSubtitleKey(resolved.playableUrl, resolved.vaultFile || null));
+      add(this.getStableSubtitleKey(resolved.displayPath, resolved.vaultFile || null));
+    }
+    for (const [key, entry] of Object.entries(this.directUrlMap || {})) {
+      if (!entry?.directUrl) continue;
+      if (keys.has(key) || keys.has(entry.originalUrl) || keys.has(entry.directUrl)) {
+        add(key);
+        add(entry.originalUrl);
+        add(entry.directUrl);
+      }
+    }
+    return [...keys];
+  }
+
+  timestampNodeMatchesMedia(node: TimestampNode, mediaUrl: string, displayPath?: string): boolean {
+    if (!node.mediaUrl) return false;
+    const candidates = new Set<string>([
+      ...this.getTimestampMediaMatchKeys(mediaUrl),
+      ...this.getTimestampMediaMatchKeys(displayPath),
+    ]);
+    return this.getTimestampMediaMatchKeys(node.mediaUrl).some((key) => candidates.has(key));
+  }
+
+  async getTimestampEntriesForNote(
+    notePath: string,
+    mediaUrl?: string,
+    displayPath?: string,
+  ): Promise<TimestampNode[]> {
+    if (!notePath) return [];
+    const file = this.app.vault.getAbstractFileByPath(notePath);
+    if (!(file instanceof TFile)) return [];
+    try {
+      const content = await this.app.vault.read(file);
+      if (!mediaUrl) return this.extractTimestampEntries(content);
+      return this.extractTimestampEntriesByMedia(content)
+        .filter((node) => this.timestampNodeMatchesMedia(node, mediaUrl, displayPath));
+    } catch {
+      return [];
+    }
+  }
+
+  clearMobileTimestampRail(): void {
+    this.mobileTimestampRailEl?.remove();
+    this.mobileTimestampRailEl = null;
+    this.mobileTimestampRailView?.containerEl.removeClass("smn-mobile-timestamp-mode");
+    this.mobileTimestampRailView = null;
+    this.mobileTimestampRailEditMode = false;
+  }
+
+  async toggleMobileTimestampRail(): Promise<void> {
+    this.settings.showMobileTimestampRail = this.settings.showMobileTimestampRail === false;
+    await this.saveSettings();
+
+    if (!Platform.isMobileApp) {
+      new Notice(
+        `Mobile timestamp rail ${this.settings.showMobileTimestampRail ? "enabled" : "disabled"}.`,
+      );
+      return;
+    }
+
+    if (this.settings.showMobileTimestampRail === false) {
+      this.clearMobileTimestampRail();
+      new Notice("Mobile timestamp rail disabled.");
+      return;
+    }
+
+    const editor = this.getActiveEditor();
+    await this.showMobileTimestampRail(editor);
+    new Notice("Mobile timestamp rail enabled.");
+  }
+
+  async toggleMobileTimestampRailEditMode(): Promise<void> {
+    this.mobileTimestampRailEditMode = !this.mobileTimestampRailEditMode;
+
+    if (!Platform.isMobileApp) {
+      new Notice(
+        `Mobile timestamp rail edit mode ${this.mobileTimestampRailEditMode ? "enabled" : "disabled"}.`,
+      );
+      return;
+    }
+
+    const editor = this.getActiveEditor();
+    if (this.mobileTimestampRailEl) {
+      await this.showMobileTimestampRail(editor);
+    }
+    new Notice(
+      this.mobileTimestampRailEditMode
+        ? "Mobile timestamp rail edit mode enabled."
+        : "Mobile timestamp rail preview mode restored.",
+    );
+  }
+
+  async saveMobileTimestampPreview(
+    view: MarkdownView,
+    startLine: number,
+    endLine: number,
+    nextText: string,
+  ): Promise<void> {
+    const normalizedText = nextText.replace(/\r/g, "");
+    const editor = view.editor;
+    if (editor) {
+      editor.replaceRange(
+        normalizedText,
+        { line: startLine, ch: 0 },
+        {
+          line: endLine,
+          ch: 0,
+        },
+      );
+      new Notice("Note snippet updated.");
+      return;
+    }
+    if (!view.file) return;
+    const content = await this.app.vault.read(view.file);
+    const lines = content.split("\n");
+    lines.splice(startLine, endLine - startLine, ...normalizedText.split("\n"));
+    await this.app.vault.modify(view.file, lines.join("\n"));
+    new Notice("Note snippet updated.");
+  }
+
+  async showMobileTimestampRail(editor: Editor | null): Promise<void> {
+    if (!Platform.isMobileApp) return;
+    if (this.settings.showMobileTimestampRail === false) {
+      this.clearMobileTimestampRail();
+      return;
+    }
+    const view = this.getMarkdownViewForEditor(editor);
+    if (!view) return;
+    const content = editor
+      ? editor.getValue()
+      : view.file
+        ? await this.app.vault.read(view.file)
+        : "";
+    const timestamps = this.extractTimestampEntries(content);
+    this.clearMobileTimestampRail();
+
+    view.containerEl.addClass("smn-mobile-timestamp-mode");
+    this.mobileTimestampRailView = view;
+    const rail = view.containerEl.createDiv({ cls: "smn-mobile-timestamp-rail" });
+    this.mobileTimestampRailEl = rail;
+
+    const header = rail.createDiv({ cls: "smn-mobile-timestamp-rail-header" });
+    const headerText = header.createDiv({ cls: "smn-mobile-timestamp-rail-title" });
+    headerText.createSpan({ text: "Timestamps" });
+    headerText.createEl("small", {
+      text: view.file?.basename || "Current note",
+    });
+    const closeBtn = header.createEl("button", {
+      cls: "smn-mobile-timestamp-rail-close",
+      text: "Exit",
+      title: "Show the full note again",
+    });
+    closeBtn.addEventListener("click", () => this.clearMobileTimestampRail());
+
+    const list = rail.createDiv({ cls: "smn-mobile-timestamp-rail-list" });
+    if (!timestamps.length) {
+      list.createDiv({
+        cls: "smn-mobile-timestamp-rail-empty",
+        text: "No timestamp blocks found in this note.",
+      });
+      const exitBtn = rail.createEl("button", {
+        cls: "smn-mobile-timestamp-rail-exit",
+        text: "Exit timestamp rail",
+      });
+      exitBtn.addEventListener("click", () => this.clearMobileTimestampRail());
+      return;
+    }
+    timestamps.forEach((entry) => {
+      const item = list.createDiv({ cls: "smn-mobile-timestamp-rail-row" });
+      const button = item.createEl("button", {
+        cls: "smn-mobile-timestamp-rail-item",
+        text: entry.label,
+      });
+      button.addEventListener("click", () => this.seekToTimestamp(entry.seconds));
+      if (
+        this.settings.showMobileTimestampRailPreview === true &&
+        entry.preview &&
+        entry.previewStartLine != null &&
+        entry.previewEndLine != null
+      ) {
+        const expandBtn = item.createEl("button", {
+          cls: "smn-mobile-timestamp-rail-expand",
+          text: "+",
+          title: this.mobileTimestampRailEditMode
+            ? "Edit nearby note content"
+            : "Preview nearby note content",
+        });
+        const preview = item.createDiv({ cls: "smn-mobile-timestamp-rail-preview" });
+        if (this.mobileTimestampRailEditMode) {
+          const textarea = preview.createEl("textarea", {
+            cls: "smn-mobile-timestamp-rail-editor",
+            text: entry.preview,
+          });
+          const actions = preview.createDiv({ cls: "smn-mobile-timestamp-rail-actions" });
+          const saveBtn = actions.createEl("button", {
+            cls: "smn-mobile-timestamp-rail-save",
+            text: "Save",
+          });
+          saveBtn.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            saveBtn.disabled = true;
+            await this.saveMobileTimestampPreview(
+              view,
+              entry.previewStartLine!,
+              entry.previewEndLine!,
+              textarea.value,
+            );
+            saveBtn.disabled = false;
+          });
+        } else {
+          preview.createDiv({
+            cls: "smn-mobile-timestamp-rail-preview-text",
+            text: entry.preview,
+          });
+        }
+        preview.style.display = "none";
+        expandBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const shouldShow = preview.style.display === "none";
+          preview.style.display = shouldShow ? "block" : "none";
+          expandBtn.setText(shouldShow ? "-" : "+");
+        });
+      }
+    });
+    const exitBtn = rail.createEl("button", {
+      cls: "smn-mobile-timestamp-rail-exit",
+      text: "Exit timestamp rail",
+    });
+    exitBtn.addEventListener("click", () => this.clearMobileTimestampRail());
+  }
+
   buildLibraryNote(
     url: string,
     meta: {
@@ -1202,7 +2544,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
       sourceLabel?: string;
       displayPath?: string;
     },
-    options?: { skipInsert?: boolean },
+    options?: { skipInsert?: boolean; directPlaybackOverride?: boolean },
   ): Promise<void> {
     const editor = this.getActiveEditor();
     if (editor && this.settings.autoInsertLibraryNote && !options?.skipInsert) {
@@ -1215,6 +2557,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
         : url,
       editor!,
       vaultFile || null,
+      {
+        alias: meta.title,
+        sourceUrl: meta.displayPath || url,
+        displayPath: meta.displayPath || url,
+        directPlaybackOverride: options?.directPlaybackOverride,
+      },
     );
     // Track this media in the saved media collection
     await this.trackTimestamp(url, {
@@ -1441,6 +2789,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
     url: string,
     editor: Editor | null,
     vaultFile: TFile | null = null,
+    mediaContext?: {
+      alias?: string;
+      sourceUrl?: string;
+      displayPath?: string;
+      directPlaybackOverride?: boolean;
+    },
   ): Promise<void> {
     let resolvedUrl = url;
     let systemPath: string | null = null;
@@ -1454,9 +2808,66 @@ export default class SmartMediaNotesPlugin extends Plugin {
         return;
       }
     }
+    let usedDirectUrl = false;
+    const shouldUseDirectPlayback =
+      mediaContext?.directPlaybackOverride ??
+      (Platform.isMobileApp && isYouTubeUrl(url) ? true : this.settings.directPlayback);
+    if (
+      !systemPath &&
+      shouldUseDirectPlayback &&
+      /^https?:\/\//i.test(url)
+    ) {
+      await this.loadDirectUrlMapFromVault();
+      const directUrl = this.getValidDirectUrl(
+        url,
+        mediaContext?.sourceUrl,
+        mediaContext?.displayPath,
+      );
+      if (directUrl) {
+        resolvedUrl = directUrl;
+        usedDirectUrl = true;
+      } else {
+        const reloadedDirectUrl = this.getValidDirectUrl(
+          url,
+          mediaContext?.sourceUrl,
+          mediaContext?.displayPath,
+        );
+        if (reloadedDirectUrl) {
+          resolvedUrl = reloadedDirectUrl;
+          usedDirectUrl = true;
+        }
+      }
+    }
+    if (!usedDirectUrl && !systemPath && Platform.isMobileApp && isYouTubeUrl(url)) {
+      this.clearMobileTimestampRail();
+      window.open(toYouTubeWatchUrl(url), "_blank", "noopener,noreferrer");
+      new Notice("Opening YouTube externally on mobile.");
+      return;
+    }
+    if (
+      !systemPath &&
+      this.settings.experimentalBilibiliDirectPlayback &&
+      isBilibiliUrl(url)
+    ) {
+      const source = await resolveBilibiliSource(url, {
+        preferDirect: true,
+        cookie: this.settings.bilibiliCookie,
+      });
+      if (source.type === "direct") {
+        resolvedUrl = source.url;
+        new Notice("Bilibili direct playback enabled for this video.");
+      }
+    }
     this.currentUrl = resolvedUrl;
-    this.currentUrlKey = systemPath ? url : resolvedUrl;
+    this.currentUrlKey = systemPath || isBilibiliUrl(url) || usedDirectUrl ? url : resolvedUrl;
+    this.currentUrlCanSeek = usedDirectUrl || (!isYouTubeUrl(url) && (!isBilibiliUrl(url) || resolvedUrl !== url));
+    this.currentMediaAlias = mediaContext?.alias || "";
+    this.currentMediaSourceUrl = mediaContext?.sourceUrl || url;
+    this.currentMediaDisplayPath = mediaContext?.displayPath || mediaContext?.sourceUrl || url;
+    this.currentMediaVaultFile = vaultFile;
     this.editor = editor;
+    await this.showMobileTimestampRail(editor);
+    const isBilibiliDirectAttempt = isBilibiliUrl(url) && resolvedUrl !== url;
 
     const videoLeaf = await this.getOrCreateVideoLeaf();
     this.app.workspace.revealLeaf(videoLeaf);
@@ -1478,6 +2889,29 @@ export default class SmartMediaNotesPlugin extends Plugin {
             this.setPlaying = setPlaying;
           },
           setupError: (err: string) => {
+            if (isBilibiliDirectAttempt) {
+              new Notice("Bilibili direct playback failed. Falling back to embedded player.");
+              const previous = this.settings.experimentalBilibiliDirectPlayback;
+              this.settings.experimentalBilibiliDirectPlayback = false;
+              void this.activateView(url, editor, vaultFile, mediaContext).finally(() => {
+                this.settings.experimentalBilibiliDirectPlayback = previous;
+              });
+              return;
+            }
+            if (usedDirectUrl) {
+              new Notice("Direct URL playback failed. Marking this cached URL invalid and falling back.");
+              void this.invalidateDirectUrl(
+                url,
+                [mediaContext?.sourceUrl, mediaContext?.displayPath],
+                err,
+              ).finally(() => {
+                void this.activateView(url, editor, vaultFile, {
+                  ...mediaContext,
+                  directPlaybackOverride: false,
+                });
+              });
+              return;
+            }
             if (editor) {
               editor.replaceSelection(
                 editor.getSelection() +
@@ -1492,6 +2926,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
                 Number(this.player.getCurrentTime().toFixed(0)),
               );
             }
+            this.clearMobileTimestampRail();
             await this.saveSettings();
           },
           start:
@@ -1512,9 +2947,14 @@ export default class SmartMediaNotesPlugin extends Plugin {
             : null,
           onNavigatePlaylist: async (file) => {
             const newUrl = this.app.vault.getResourcePath(file);
-            await this.activateView(newUrl, this.editor, file);
+            await this.activateView(newUrl, this.editor, file, {
+              alias: file.basename,
+              sourceUrl: file.path,
+              displayPath: file.path,
+            });
           },
           isAudio: audio,
+          forceNativePlayer: usedDirectUrl,
         };
         leaf.setEphemeralState(state);
         void this.saveSettings();
@@ -1547,10 +2987,15 @@ export default class SmartMediaNotesPlugin extends Plugin {
       this.settings = {
         ...(DEFAULT_SETTINGS as SmartMediaNotesSettings),
         ...data,
+        directPlayback:
+          data.directPlayback ?? data.youtubeDirectPlayback ?? DEFAULT_SETTINGS.directPlayback,
+        ytdlpPath:
+          data.ytdlpPath || data.youtubeDlpPath || DEFAULT_SETTINGS.ytdlpPath,
         urlStartTimeMap: map,
         // 强制字幕缓存为空 — 从磁盘文件按需加载
         subtitleLibrary: {},
         subtitleFileMap: data.subtitleFileMap || {},
+        directPlaybackOverrides: data.directPlaybackOverrides || {},
         rssSubscriptions: data.rssSubscriptions || [],
         mediaFolders: data.mediaFolders || [],
       };
@@ -1565,6 +3010,8 @@ export default class SmartMediaNotesPlugin extends Plugin {
       this.settings.videoFormats || DEFAULT_SETTINGS.videoFormats!,
       this.settings.audioFormats || DEFAULT_SETTINGS.audioFormats!,
     );
+    await this.loadSubtitleIndexFromVault();
+    await this.loadDirectUrlMapFromVault();
   }
 
   async saveSettings(): Promise<void> {
@@ -1600,7 +3047,11 @@ class VaultMediaModal extends FuzzySuggestModal<TFile> {
 
   onChooseItem(file: TFile): void {
     const resourceUrl = this.app.vault.getResourcePath(file);
-    void this.plugin.activateView(resourceUrl, this.plugin.editor, file);
+    void this.plugin.activateView(resourceUrl, this.plugin.editor, file, {
+      alias: file.basename,
+      sourceUrl: file.path,
+      displayPath: file.path,
+    });
   }
 }
 
@@ -1884,7 +3335,11 @@ class PodcastModal extends Modal {
           ep.title +
           "\n";
         this.editor?.replaceSelection(note);
-        await this.plugin.activateView(ep.url, this.editor);
+        await this.plugin.activateView(ep.url, this.editor, null, {
+          alias: ep.title,
+          sourceUrl: ep.url,
+          displayPath: ep.url,
+        });
         await this.plugin.trackTimestamp(ep.url, {
           title: ep.title,
           sourceLabel: this.feedTitle,
@@ -1901,12 +3356,30 @@ class PodcastModal extends Modal {
 }
 
 class LocalFileModal extends Modal {
-  activateView: (url: string, editor: Editor | null) => void;
+  activateView: (
+    url: string,
+    editor: Editor | null,
+    vaultFile?: TFile | null,
+    mediaContext?: {
+      alias?: string;
+      sourceUrl?: string;
+      displayPath?: string;
+    },
+  ) => void;
   editor: Editor | null;
 
   constructor(
     app: App,
-    activateView: (url: string, editor: Editor | null) => void,
+    activateView: (
+      url: string,
+      editor: Editor | null,
+      vaultFile?: TFile | null,
+      mediaContext?: {
+        alias?: string;
+        sourceUrl?: string;
+        displayPath?: string;
+      },
+    ) => void,
     editor: Editor | null,
   ) {
     super(app);
@@ -1926,8 +3399,13 @@ class LocalFileModal extends Modal {
     input.onchange = (e: Event) => {
       const target = e.target as HTMLInputElement;
       if (target.files?.[0]) {
-        const url = URL.createObjectURL(target.files[0]);
-        this.activateView(url, this.editor);
+        const file = target.files[0];
+        const url = URL.createObjectURL(file);
+        this.activateView(url, this.editor, null, {
+          alias: file.name.replace(/\.[^.]+$/, ""),
+          sourceUrl: file.name,
+          displayPath: file.name,
+        });
         this.close();
       }
     };
@@ -1949,6 +3427,7 @@ class SubtitleModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     const targetUrl = this.plugin.getTargetUrl(this.plugin.editor!);
+    const targetAlias = this.plugin.getTargetAlias(this.plugin.editor || undefined);
     contentEl.createEl("h3", { text: "Import subtitle file" });
     if (!targetUrl) {
       contentEl.createEl("p", {
@@ -1957,7 +3436,25 @@ class SubtitleModal extends Modal {
       return;
     }
     contentEl.createEl("p", {
-      text: `Bind subtitles to: ${targetUrl}`,
+      text: "Choose a .srt or .vtt file. Smart Media Notes will save a renamed copy in your vault subtitle folder.",
+    });
+    contentEl.createEl("p", {
+      text: targetAlias
+        ? `Current media: ${targetAlias}`
+        : `Current media: ${this.plugin.currentMediaDisplayPath || targetUrl}`,
+    });
+    contentEl.createEl("p", {
+      text: `Linked URL/path: ${targetUrl}`,
+      cls: "smn-subtitle-modal-link",
+    });
+    const pickerRow = contentEl.createEl("div", { cls: "smn-subtitle-import-row" });
+    const pickButton = pickerRow.createEl("button", {
+      cls: "smn-subtitle-import-button",
+      text: "Choose subtitle file",
+    });
+    const pickedName = pickerRow.createEl("span", {
+      cls: "smn-subtitle-import-name",
+      text: "No file selected",
     });
     const input = contentEl.createEl("input");
     input.setAttribute("type", "file");
@@ -1965,10 +3462,15 @@ class SubtitleModal extends Modal {
       "accept",
       ".srt,.vtt,text/vtt,application/x-subrip",
     );
+    input.addClass("smn-hidden-file-input");
+    pickButton.addEventListener("click", () => input.click());
     input.onchange = async (e: Event) => {
       const target = e.target as HTMLInputElement;
       const file = target.files?.[0];
       if (!file) return;
+      pickedName.setText(file.name);
+      pickButton.setText("Importing...");
+      pickButton.disabled = true;
       await this.plugin.importSubtitlesForUrl(targetUrl, file);
       this.close();
     };

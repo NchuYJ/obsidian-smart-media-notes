@@ -6,6 +6,48 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [1.3.0] — Beta: Video Notes, Mobile Playback, and Direct URL Sync
+
+### Added
+- Dedicated HLS player path for `.m3u8` streams using native browser support when available and `hls.js` as the fallback.
+- Clearer HLS playback error message for streams blocked by browser/WebView support, CORS, or streaming permissions.
+- Bilibili video-page detection for `BV` and `av` links, rendered through Bilibili's official embedded player.
+- External-open fallback button for embedded platform players, useful on mobile WebView environments where iframe playback is restricted.
+- Mobile-friendly player, subtitle, playlist, tag, and library touch sizing.
+- Command to convert selected time text such as `1:23` or `1:02:03` into a clickable `timestamp` block.
+- Experimental Bilibili direct playback resolver that tries Bilibili API playback URLs before falling back to the embedded player.
+- Optional local Bilibili cookie setting for experimental resolver requests.
+- External timestamp fallback for YouTube and Bilibili links, opening platform URLs with the selected time when mobile iframe playback is blocked.
+- Vault-synced subtitle index at `Subtitles/smart-media-notes-subtitles.json` so imported subtitle mappings can sync across desktop and mobile without syncing plugin `data.json`.
+- Vault-synced direct URL map at `Subtitles/smart-media-notes-direct-url-map.json` so resolved page-link playback can sync across desktop and mobile.
+- Generic `yt-dlp` direct URL resolver for supported HTTP video page links, with Smart Media Library refresh support and per-item direct/original playback choice.
+- Command to reconcile the synced subtitle index after media notes, subtitle files, or timestamp-url links are deleted or changed.
+- More readable subtitle filenames based on media identity, original subtitle filename, and a short hash.
+- Smart Media Library subtitle management, including mapped and unused subtitle visibility plus delete/update flows from inside the library.
+- Mobile timestamp rail with expandable timestamp previews for narrow note panes while the player is open.
+- Command to toggle mobile timestamp rail on demand.
+- Command to toggle mobile timestamp rail edit mode on demand.
+
+### Changed
+- Existing direct media, vault media, audio, YouTube/embed-style links, subtitles, playlist navigation, and timestamp controls continue through the existing player path.
+- README and tutorial now focus on video note-taking, mobile workflows, subtitle usage, and `yt-dlp`-based direct playback sync.
+- Bilibili embeds no longer use a manual estimated timer; timestamp creation should use selected time text, while timestamp click-to-jump remains supported.
+- Bilibili direct playback automatically falls back to the embedded player if the resolved media URL cannot play in Obsidian.
+- Mobile player/subtitle layout refined so the player, current subtitle banner, and subtitle browser share the screen more predictably.
+- Mobile timestamp preview now opens in read-only preview mode by default, with editing gated behind a dedicated command.
+- Saved Media entries now group and show only the timestamps that belong to the nearest related `timestamp-url` section.
+- Subtitle overlay text is now selectable and copyable.
+- Direct URL cache validity now depends on real playback failure instead of expiring automatically on every restart.
+
+### Fixed
+- Duplicate vault copies of the direct URL map no longer fight each other on mobile; the plugin now prefers the better resolved entry and writes the merged result back to existing map files.
+- Mobile YouTube opening now checks synced direct URL mappings before falling back to external app open.
+- Legacy `smart-media-notes-youtube-direct.json` files are cleaned up so only the unified direct URL map remains active.
+- Subtitle index cleanup now updates existing synced index files, preventing deleted or unused subtitle entries from reappearing after refresh or restart.
+- Direct playback candidate selection now avoids common audio-only and unsupported YouTube HLS cases more reliably.
+
+---
+
 ## [2026-05-15] — Fixes: Voice Bar Duration, Timestamp Collection Connected, Collapsible Library
 
 ### Fixed

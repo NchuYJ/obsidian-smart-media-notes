@@ -80,6 +80,146 @@ export function isAudioFile(url: string): boolean {
   return AUDIO_EXTENSIONS_RE.test(url);
 }
 
+/** 判断 URL 是否为 HLS / m3u8 播放列表 */
+export function isHlsUrl(url: string): boolean {
+  return /\.m3u8(?:[/?#]|$)/i.test(normalizeMediaCandidate(url));
+}
+
+/** 判断 URL 是否为 Bilibili 页面或短链 */
+export function isBilibiliUrl(url: string): boolean {
+  const trimmed = normalizeMediaCandidate(url);
+  if (!/^https?:\/\//i.test(trimmed)) return false;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return /(^|\.)bilibili\.com$/.test(host) || host === "b23.tv";
+  } catch {
+    return false;
+  }
+}
+
+/** 将 Bilibili 视频页转换为官方 iframe 播放器地址；短链无法离线展开时返回 null。 */
+export function toBilibiliEmbedUrl(url: string, startSeconds = 0): string | null {
+  const trimmed = normalizeMediaCandidate(url);
+  try {
+    const parsed = new URL(trimmed);
+    const path = parsed.pathname;
+    const page = parsed.searchParams.get("p") || parsed.searchParams.get("page") || "1";
+    const bvid = parsed.searchParams.get("bvid") || path.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1];
+    const aid = parsed.searchParams.get("aid") || path.match(/\/video\/av(\d+)/i)?.[1];
+    const embed = new URL("https://player.bilibili.com/player.html");
+    embed.searchParams.set("page", page);
+    embed.searchParams.set("autoplay", "0");
+    if (startSeconds > 0) {
+      const seconds = Math.max(0, Math.floor(startSeconds));
+      embed.searchParams.set("t", String(seconds));
+      embed.searchParams.set("start_progress", String(seconds * 1000));
+    }
+    if (bvid) {
+      embed.searchParams.set("bvid", bvid);
+      return embed.toString();
+    }
+    if (aid) {
+      embed.searchParams.set("aid", aid);
+      return embed.toString();
+    }
+  } catch {
+    // not a valid URL
+  }
+  return null;
+}
+
+export function toBilibiliWatchUrlAtTime(url: string, seconds: number): string | null {
+  const trimmed = normalizeMediaCandidate(url);
+  try {
+    const parsed = new URL(trimmed);
+    parsed.searchParams.set("t", String(Math.max(0, Math.floor(seconds))));
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function isYouTubeUrl(url: string): boolean {
+  const trimmed = normalizeMediaCandidate(url);
+  if (!/^https?:\/\//i.test(trimmed)) return false;
+  try {
+    const host = new URL(trimmed).hostname.toLowerCase();
+    return (
+      host === "youtu.be" ||
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function toYouTubeUrlAtTime(url: string, seconds: number): string | null {
+  const trimmed = normalizeMediaCandidate(url);
+  try {
+    const parsed = new URL(trimmed);
+    const safeSeconds = Math.max(0, Math.floor(seconds));
+    const host = parsed.hostname.toLowerCase();
+    let videoId = "";
+    if (host === "youtu.be") {
+      videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    } else if (parsed.pathname.startsWith("/embed/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else if (parsed.pathname.startsWith("/shorts/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else {
+      videoId = parsed.searchParams.get("v") || "";
+    }
+    if (videoId) {
+      const watchUrl = new URL("https://www.youtube.com/watch");
+      watchUrl.searchParams.set("v", videoId);
+      watchUrl.searchParams.set("t", String(safeSeconds) + "s");
+      return watchUrl.toString();
+    }
+    if (parsed.hostname.toLowerCase() === "youtu.be") {
+      parsed.searchParams.set("t", String(safeSeconds));
+      return parsed.toString();
+    }
+    parsed.searchParams.set("t", String(safeSeconds));
+    parsed.searchParams.set("start", String(safeSeconds));
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export function toYouTubeWatchUrl(url: string): string {
+  const trimmed = normalizeMediaCandidate(url);
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    let videoId = "";
+    if (host === "youtu.be") {
+      videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    } else if (parsed.pathname.startsWith("/embed/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else if (parsed.pathname.startsWith("/shorts/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else {
+      videoId = parsed.searchParams.get("v") || "";
+    }
+    if (!videoId) return trimmed;
+    const watchUrl = new URL("https://www.youtube.com/watch");
+    watchUrl.searchParams.set("v", videoId);
+    return watchUrl.toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+export function toExternalTimestampUrl(url: string, seconds: number): string | null {
+  if (isBilibiliUrl(url)) return toBilibiliWatchUrlAtTime(url, seconds);
+  if (isYouTubeUrl(url)) return toYouTubeUrlAtTime(url, seconds);
+  return null;
+}
+
 export function formatSecondsAsTimestamp(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Number(totalSeconds || 0));
   const leadingZero = (num: number) =>
@@ -154,6 +294,35 @@ export function urlToSafeName(url: string): string {
   return name + "_" + absHash.slice(0, 6);
 }
 
+export function urlToReadableSubtitleName(
+  url: string,
+  subtitleFileName?: string,
+  hashSource?: string,
+): string {
+  const safePart = (value: string, maxLength: number) =>
+    value
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/^_|_$/g, "")
+      .slice(0, maxLength);
+  let label = "";
+  try {
+    const parsed = new URL(normalizeMediaCandidate(url));
+    const host = parsed.hostname.replace(/^www\./, "");
+    const youtubeId = parsed.searchParams.get("v");
+    const bilibiliId = parsed.pathname.match(/\/video\/(BV[0-9A-Za-z]+)/i)?.[1];
+    const pathName = parsed.pathname.split("/").filter(Boolean).pop() || host;
+    label = bilibiliId || youtubeId || `${host}_${pathName}`;
+  } catch {
+    label = url.split(/[\\/]/).pop() || url;
+  }
+  const subtitleBase = subtitleFileName ? safePart(subtitleFileName, 28) : "";
+  const mediaBase = safePart(label, 58) || "subtitle";
+  const hash = urlToSafeName(hashSource || url).split("_").pop() || "media";
+  return [mediaBase, subtitleBase, hash].filter(Boolean).join("__");
+}
+
 export function normalizeMediaCandidate(value: unknown): string {
   if (!value || typeof value !== "string") return "";
   let normalized = value.trim();
@@ -166,6 +335,9 @@ export function normalizeMediaCandidate(value: unknown): string {
       (normalized.startsWith("'") && normalized.endsWith("'"))) {
     normalized = normalized.slice(1, -1).trim();
   }
+  if (/^https?:\/\//i.test(normalized)) {
+    normalized = normalized.replace(/[，。,.;；!?！？]+$/g, "");
+  }
   return normalized;
 }
 
@@ -177,6 +349,9 @@ export function isPlayableMedia(url: string): boolean {
     return true;
   }
   if (/\.(mp3|m4a|m4b|aac|ogg|oga|wav|wma|flac|opus|webm|mp4|mov|avi|mkv|wmv|flv|ogv|webm|m3u8|mpd)(\?.*)?$/i.test(trimmed)) {
+    return true;
+  }
+  if (isBilibiliUrl(trimmed)) {
     return true;
   }
   try {

@@ -1,8 +1,15 @@
-import { Editor, ItemView, MarkdownView, TFile, WorkspaceLeaf } from "obsidian";
+import { Editor, ItemView, MarkdownView, Modal, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import React from "react";
 import { createRoot, Root } from "react-dom/client";
 import VideoContainer, { PlaylistInfo } from "./VideoContainer";
-import { MediaFileEntry, PodcastEpisode, SubtitleCue } from "../utils";
+import {
+  MediaFileEntry,
+  PodcastEpisode,
+  SubtitleCue,
+  isBilibiliUrl,
+  isHlsUrl,
+  isYouTubeUrl,
+} from "../utils";
 import type SmartMediaNotesPlugin from "../main";
 
 interface PlayerHandle {
@@ -38,6 +45,7 @@ interface EphemeralState {
   playlist?: PlaylistInfo | null;
   onNavigatePlaylist?: (file: TFile) => Promise<void>;
   isAudio?: boolean;
+  forceNativePlayer?: boolean;
 }
 
 export class VideoView extends ItemView {
@@ -82,6 +90,7 @@ export class VideoView extends ItemView {
         playlist: state.playlist,
         onNavigatePlaylist: state.onNavigatePlaylist,
         isAudio: state.isAudio,
+        forceNativePlayer: state.forceNativePlayer,
       }),
     );
   }
@@ -125,34 +134,44 @@ export class MediaLibraryView extends ItemView {
     container.setCssProps({ padding: "0" });
 
     const wrap = container.createEl("div", {
-      style: {
-        height: "100%",
-        overflowY: "auto",
-        background:
-          "linear-gradient(180deg, var(--background-primary) 0%, var(--background-secondary) 100%)",
-      },
+      cls: "smn-library-wrap",
     });
 
     const header = wrap.createEl("div", {
-      style: {
-        padding: "16px 16px 12px",
-        borderBottom: "1px solid var(--background-modifier-border)",
-        position: "sticky",
-        top: "0",
-        background:
-          "color-mix(in srgb, var(--background-primary) 92%, transparent)",
-        backdropFilter: "blur(10px)",
-        zIndex: "1",
-      },
+      cls: "smn-library-header",
+    });
+    const headerText = header.createEl("div", { cls: "smn-library-header-text" });
+    headerText.createEl("div", {
+      cls: "smn-library-title",
+      text: "Smart Media Library",
+    });
+    headerText.createEl("div", {
+      cls: "smn-library-subtitle",
+      text: "Media, subtitles, feeds, and vault files",
+    });
+    const refreshBtn = header.createEl("button", {
+      cls: "smn-library-header-action",
+      text: "Refresh",
+      title: "Reconcile saved media and synced subtitle index",
+    });
+    refreshBtn.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      refreshBtn.disabled = true;
+      refreshBtn.setText("Syncing...");
+      await this.plugin.reconcileTimestampCollection();
+      await this.plugin.reconcileSubtitleIndex();
+      await this.plugin.refreshLibraryView();
+      new Notice("Smart Media Library refreshed.");
     });
 
-    this.renderSavedMediaSection(wrap);
+    await this.renderSavedMediaSection(wrap);
+    await this.renderSubtitleSection(wrap);
     this.renderRssSection(wrap);
     this.renderFolderSection(wrap);
   }
 
 
-  private renderSavedMediaSection(parent: HTMLElement): void {
+  private async renderSavedMediaSection(parent: HTMLElement): Promise<void> {
     const collection = (this.plugin.settings.timestampCollection || []) as Array<{
       url: string;
       displayPath: string;
@@ -187,6 +206,10 @@ export class MediaLibraryView extends ItemView {
     section.addEventListener("toggle", () => { this._savedMediaOpen = section.open; });
 
     if (!collection.length) {
+      section.createEl("div", {
+        cls: "smn-library-section-hint",
+        text: "Open a timestamp-url block or media file once, and it will appear here for quick access.",
+      });
       return;
     }
 
@@ -245,13 +268,20 @@ export class MediaLibraryView extends ItemView {
       return;
     }
 
-    filtered.forEach((entry) => {
+    for (const entry of filtered) {
+      const subtitlePath = this.plugin.getSubtitlePathForMedia(entry.url);
+      const timestampNodes = await this.plugin.getTimestampEntriesForNote(
+        entry.notePath,
+        entry.url,
+        entry.displayPath,
+      );
       const row = section.createEl("div", {
         cls: "smn-saved-entry",
       });
 
       // Title line
       const titleRow = row.createEl("div", {
+        cls: "smn-saved-entry-title-row",
         style: {
           display: "flex",
           alignItems: "center",
@@ -260,6 +290,7 @@ export class MediaLibraryView extends ItemView {
         },
       });
       const titleEl = titleRow.createEl("span", {
+        cls: "smn-saved-entry-title",
         text: entry.title || entry.displayPath,
         style: {
           fontSize: "13px",
@@ -272,6 +303,10 @@ export class MediaLibraryView extends ItemView {
         },
       });
 
+      titleRow.createEl("span", {
+        cls: "smn-source-chip",
+        text: this.getMediaKindLabel(entry.url, entry.sourceLabel),
+      });
 
       // Remove button
       const removeBtn = titleRow.createEl("span", {
@@ -295,6 +330,7 @@ export class MediaLibraryView extends ItemView {
 
       // Sub-info line — source + note name + date with proper spacing
       const infoLine = row.createEl("div", {
+        cls: "smn-saved-entry-info",
         style: {
           fontSize: "10px",
           color: "var(--text-faint)",
@@ -331,8 +367,95 @@ export class MediaLibraryView extends ItemView {
         style: { opacity: "0.6", flexShrink: "0" },
       });
 
+      const subtitleLine = row.createEl("div", {
+        cls: subtitlePath ? "smn-subtitle-status has-subtitle" : "smn-subtitle-status is-missing",
+      });
+      const subtitleText = subtitleLine.createEl("span", {
+        cls: "smn-subtitle-status-text",
+        text: subtitlePath ? "CC " + subtitlePath : "CC No subtitle linked",
+      });
+      const subtitleInput = subtitleLine.createEl("input");
+      subtitleInput.setAttribute("type", "file");
+      subtitleInput.setAttribute("accept", ".srt,.vtt,text/vtt,application/x-subrip");
+      subtitleInput.addClass("smn-hidden-file-input");
+      const uploadSubtitleBtn = subtitleLine.createEl("button", {
+        cls: "smn-saved-subtitle-upload",
+        text: subtitlePath ? "Update" : "Upload",
+        title: subtitlePath ? "Update subtitles for this media" : "Upload subtitles for this media",
+      });
+      uploadSubtitleBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        subtitleInput.click();
+      });
+      subtitleInput.addEventListener("click", (event) => event.stopPropagation());
+      subtitleInput.onchange = async (event: Event) => {
+        event.stopPropagation();
+        const target = event.target as HTMLInputElement;
+        const file = target.files?.[0];
+        if (!file) return;
+        uploadSubtitleBtn.disabled = true;
+        uploadSubtitleBtn.setText("Saving...");
+        await this.plugin.importSubtitlesForMedia(entry.url, file, {
+          alias: entry.title || entry.displayPath,
+          sourceUrl: entry.displayPath || entry.url,
+          displayPath: entry.displayPath || entry.url,
+        });
+        await this.plugin.refreshLibraryView();
+        new Notice("Subtitles saved for this media.");
+      };
+
+      if (/^https?:\/\//i.test(entry.url)) {
+        const directStatus = this.plugin.getDirectUrlStatus(
+          entry.url,
+          entry.displayPath,
+        );
+        const overrideMap = this.plugin.settings.directPlaybackOverrides || {};
+        const overrideValue = overrideMap[entry.url];
+        const directAvailable = directStatus.state === "ready";
+        const useDirect = directAvailable && (overrideValue ?? true);
+        const directLine = row.createEl("div", {
+          cls: `smn-direct-url-status is-${directStatus.state}`,
+        });
+        directLine.createEl("span", {
+          cls: "smn-direct-url-status-text",
+          text: directStatus.label,
+        });
+        const modeBtn = directLine.createEl("button", {
+          cls: useDirect
+            ? "smn-direct-url-mode is-direct"
+            : "smn-direct-url-mode is-original",
+          text: useDirect ? "Direct" : "Original",
+          title: directAvailable
+            ? "Toggle whether this saved item opens with the yt-dlp direct URL or the original page URL"
+            : "Resolve a direct URL before using direct mode",
+        });
+        modeBtn.disabled = !directAvailable;
+        modeBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          this.plugin.settings.directPlaybackOverrides = {
+            ...(this.plugin.settings.directPlaybackOverrides || {}),
+            [entry.url]: !useDirect,
+          };
+          await this.plugin.saveSettings();
+          await this.plugin.refreshLibraryView();
+        });
+        const resolveBtn = directLine.createEl("button", {
+          cls: "smn-direct-url-resolve",
+          text: directStatus.state === "ready" ? "Refresh" : "Resolve",
+          title: "Resolve this link with yt-dlp on desktop",
+        });
+        resolveBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          resolveBtn.disabled = true;
+          resolveBtn.setText("Resolving...");
+          await this.plugin.resolveAndSaveDirectUrl(entry.url);
+          await this.plugin.refreshLibraryView();
+        });
+      }
+
       // Tags
       const tagRow = row.createEl("div", {
+        cls: "smn-saved-entry-tags",
         style: { display: "flex", flexWrap: "wrap", alignItems: "center" },
       });
       entry.tags.forEach((tag) => {
@@ -349,6 +472,49 @@ export class MediaLibraryView extends ItemView {
           void this.render();
         });
       });
+
+      if (timestampNodes.length) {
+        const timestampGroupKey = `${entry.url}|${entry.notePath}`;
+        const nodesDetails = row.createEl("details", { cls: "smn-saved-timestamp-details" });
+        const expandedTimestampGroups = (this._expandedTimestampGroups || new Set<string>()) as Set<string>;
+        this._expandedTimestampGroups = expandedTimestampGroups;
+        if (expandedTimestampGroups.has(timestampGroupKey)) nodesDetails.open = true;
+        nodesDetails.addEventListener("click", (event) => {
+          event.stopPropagation();
+        });
+        nodesDetails.addEventListener("toggle", () => {
+          if (nodesDetails.open) expandedTimestampGroups.add(timestampGroupKey);
+          else expandedTimestampGroups.delete(timestampGroupKey);
+        });
+        const nodesSummary = nodesDetails.createEl("summary", { cls: "smn-saved-timestamp-summary" });
+        nodesSummary.createEl("span", { text: "Timestamps" });
+        nodesSummary.createEl("span", { text: String(timestampNodes.length) });
+        const nodesRow = nodesDetails.createEl("div", { cls: "smn-saved-timestamp-nodes" });
+        timestampNodes.forEach((node) => {
+          const chip = nodesRow.createEl("button", {
+            cls: "smn-saved-timestamp-node",
+            text: node.label,
+            title: node.subhead ? `${node.time} ${node.subhead}` : node.time,
+          });
+          chip.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            expandedTimestampGroups.add(timestampGroupKey);
+            this.plugin.settings.urlStartTimeMap.set(entry.url, node.seconds);
+            await this.plugin.saveSettings();
+            await this.plugin.openLibraryMedia(entry.url, null, {
+              title: entry.title,
+              sourceLabel: entry.sourceLabel,
+              displayPath: entry.displayPath,
+            }, {
+          skipInsert: true,
+          directPlaybackOverride:
+                this.plugin.settings.directPlaybackOverrides?.[entry.url] ??
+                true,
+            });
+            window.setTimeout(() => this.plugin.seekToTimestamp(node.seconds), 350);
+          });
+        });
+      }
 
       // Click row to jump to note and open media
       row.addEventListener("click", async () => {
@@ -395,10 +561,131 @@ export class MediaLibraryView extends ItemView {
           title: entry.title,
           sourceLabel: entry.sourceLabel,
           displayPath: entry.displayPath,
-        }, { skipInsert: true });
+        }, {
+          skipInsert: true,
+          directPlaybackOverride:
+            this.plugin.settings.directPlaybackOverrides?.[entry.url] ??
+            true,
+        });
       });
-    });
+    }
   }
+
+  private getMediaKindLabel(url: string, sourceLabel?: string): string {
+    if (isBilibiliUrl(url)) return "Bilibili";
+    if (isYouTubeUrl(url)) return "YouTube";
+    if (isHlsUrl(url)) return "HLS";
+    if (sourceLabel) return sourceLabel;
+    return /^https?:\/\//i.test(url) ? "URL" : "Vault";
+  }
+
+  private async renderSubtitleSection(parent: HTMLElement): Promise<void> {
+    const items = await this.plugin.getSubtitleLibraryItems();
+    const linkedItems = items.filter((item) => item.status === "linked");
+    const unusedItems = items.filter((item) => item.status !== "linked");
+
+    const section = parent.createEl("details", {
+      cls: "smn-library-section-block has-top-border",
+    });
+    const summary = section.createEl("summary", {
+      cls: "smn-library-section-summary",
+    });
+    summary.createEl("span", {
+      text: " Subtitles",
+      style: { fontSize: "12px", letterSpacing: "0.5px", fontWeight: "600" },
+    });
+    summary.createEl("span", {
+      text: String(items.length),
+      style: {
+        fontSize: "10px",
+        color: "var(--text-faint)",
+        fontWeight: "400",
+      },
+    });
+
+    if (this._subtitlesOpen) section.open = true;
+    section.addEventListener("toggle", () => { this._subtitlesOpen = section.open; });
+
+    if (!items.length) {
+      section.createEl("div", {
+        cls: "smn-library-section-hint",
+        text: "No synced subtitle files found yet. Import subtitles while a media item is open to manage them here.",
+      });
+      return;
+    }
+
+    const renderGroup = (
+      title: string,
+      groupItems: typeof items,
+      emptyText: string,
+    ) => {
+      const group = section.createEl("div", { cls: "smn-subtitle-group" });
+      group.createEl("div", {
+        cls: "smn-subtitle-group-title",
+        text: `${title} (${groupItems.length})`,
+      });
+      if (!groupItems.length) {
+        group.createEl("div", {
+          cls: "smn-library-section-hint small",
+          text: emptyText,
+        });
+        return;
+      }
+
+      groupItems.forEach((item) => {
+        const row = group.createEl("div", {
+          cls: item.status === "linked"
+            ? "smn-subtitle-manager-row is-linked"
+            : "smn-subtitle-manager-row is-unused",
+        });
+        const body = row.createEl("div", { cls: "smn-subtitle-manager-body" });
+        const titleRow = body.createEl("div", { cls: "smn-subtitle-manager-title-row" });
+        titleRow.createEl("span", {
+          cls: "smn-subtitle-manager-title",
+          text: item.path.split("/").pop() || item.path,
+        });
+        titleRow.createEl("span", {
+          cls: item.status === "linked"
+            ? "smn-source-chip"
+            : "smn-source-chip is-muted",
+          text: item.status === "linked" ? "Linked" : item.exists ? "Unused" : "Missing",
+        });
+        body.createEl("div", {
+          cls: "smn-subtitle-manager-path",
+          text: item.path,
+        });
+        body.createEl("div", {
+          cls: "smn-subtitle-manager-meta",
+          text: item.status === "linked"
+            ? `Mapped to: ${item.labels.slice(0, 3).join(", ")}${item.labels.length > 3 ? "..." : ""}`
+            : item.mappedKeys.length
+              ? "No current media link uses this subtitle mapping."
+              : "No media mapping found for this subtitle file.",
+        });
+
+        const deleteBtn = row.createEl("button", {
+          cls: "smn-subtitle-manager-delete",
+          text: item.exists ? "Delete" : "Remove",
+          title: item.exists
+            ? "Delete this subtitle file from the vault and remove its mappings"
+            : "Remove missing subtitle mappings",
+        });
+        deleteBtn.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          const ok = await confirmSubtitleDeletion(this.app, item.path, item.exists);
+          if (!ok) return;
+          deleteBtn.disabled = true;
+          await this.plugin.deleteSubtitleLibraryItem(item.path);
+          new Notice(item.exists ? "Subtitle file deleted." : "Subtitle mapping removed.");
+          await this.render();
+        });
+      });
+    };
+
+    renderGroup("Linked subtitles", linkedItems, "No subtitle files are currently linked to media.");
+    renderGroup("Unused subtitles", unusedItems, "No unused subtitle files found.");
+  }
+
   private renderRssSection(parent: HTMLElement): void {
     const feeds = (this.plugin.settings.rssSubscriptions || [])
       .map((feed): RssSubscriptionEntry =>
@@ -724,5 +1011,68 @@ export class MediaLibraryView extends ItemView {
         });
       });
     });
+  }
+}
+
+function confirmSubtitleDeletion(
+  app: MediaLibraryView["app"],
+  path: string,
+  exists: boolean,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = new SubtitleDeleteConfirmModal(app, path, exists, resolve);
+    modal.open();
+  });
+}
+
+class SubtitleDeleteConfirmModal extends Modal {
+  private answered = false;
+
+  constructor(
+    app: MediaLibraryView["app"],
+    private path: string,
+    private exists: boolean,
+    private resolve: (value: boolean) => void,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("smn-confirm-modal");
+    contentEl.createEl("h3", {
+      text: this.exists ? "Delete subtitle file?" : "Remove missing subtitle mapping?",
+    });
+    contentEl.createEl("p", {
+      text: this.exists
+        ? "This will delete the subtitle file from your vault and remove all Smart Media Notes mappings that point to it."
+        : "The subtitle file is already missing from your vault. This will only remove stale Smart Media Notes mappings.",
+    });
+    contentEl.createEl("p", {
+      cls: "smn-confirm-path",
+      text: this.path,
+    });
+    const actions = contentEl.createEl("div", { cls: "smn-confirm-actions" });
+    const cancelBtn = actions.createEl("button", {
+      cls: "smn-confirm-cancel",
+      text: "Cancel",
+    });
+    const deleteBtn = actions.createEl("button", {
+      cls: "smn-confirm-delete",
+      text: this.exists ? "Delete subtitle" : "Remove mapping",
+    });
+    cancelBtn.addEventListener("click", () => this.finish(false));
+    deleteBtn.addEventListener("click", () => this.finish(true));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    if (!this.answered) this.resolve(false);
+  }
+
+  private finish(value: boolean): void {
+    this.answered = true;
+    this.resolve(value);
+    this.close();
   }
 }
