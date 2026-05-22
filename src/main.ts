@@ -2257,6 +2257,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
       const nodes = this.extractTimestampEntriesFromSource(blockMatch[2]);
       nodes.forEach((node) => {
         node.mediaUrl = currentMediaUrl;
+        const preview = this.getTimestampPreviewRange(content, node.seconds);
+        if (preview) {
+          node.preview = preview.text;
+          node.previewStartLine = preview.startLine;
+          node.previewEndLine = preview.endLine;
+        }
         entries.push(node);
       });
     }
@@ -2411,7 +2417,12 @@ export default class SmartMediaNotesPlugin extends Plugin {
       : view.file
         ? await this.app.vault.read(view.file)
         : "";
-    const timestamps = this.extractTimestampEntries(content);
+    const currentMediaUrl = this.currentMediaSourceUrl || this.currentUrlKey || this.currentUrl || "";
+    const currentDisplayPath = this.currentMediaDisplayPath || this.currentMediaSourceUrl || "";
+    const timestamps = currentMediaUrl
+      ? this.extractTimestampEntriesByMedia(content)
+        .filter((node) => this.timestampNodeMatchesMedia(node, currentMediaUrl, currentDisplayPath))
+      : this.extractTimestampEntries(content);
     this.clearMobileTimestampRail();
 
     view.containerEl.addClass("smn-mobile-timestamp-mode");
