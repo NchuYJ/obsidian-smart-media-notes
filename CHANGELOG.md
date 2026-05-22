@@ -6,6 +6,18 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [1.3.2] — Review Fixes and Mobile Rail Polish
+
+### Changed
+- Plugin description wording now avoids the redundant product name in `manifest.json`.
+- Release candidate build now uses the native media / iframe player split without the old dynamic script injection player path.
+
+### Fixed
+- Mobile timestamp rail now filters timestamps to the currently opened media instead of showing every timestamp on the page.
+- Mobile timestamp rail preview now works again after media-based timestamp filtering.
+
+---
+
 ## [1.3.0] — Beta: Video Notes, Mobile Playback, and Direct URL Sync
 
 ### Added

@@ -214,6 +214,36 @@ export function toYouTubeWatchUrl(url: string): string {
   }
 }
 
+export function toYouTubeEmbedUrl(url: string, startSeconds = 0): string | null {
+  const trimmed = normalizeMediaCandidate(url);
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    let videoId = "";
+    if (host === "youtu.be") {
+      videoId = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    } else if (parsed.pathname.startsWith("/embed/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else if (parsed.pathname.startsWith("/shorts/")) {
+      videoId = parsed.pathname.split("/").filter(Boolean)[1] || "";
+    } else {
+      videoId = parsed.searchParams.get("v") || "";
+    }
+    if (!videoId) return null;
+    const embed = new URL(`https://www.youtube-nocookie.com/embed/${videoId}`);
+    embed.searchParams.set("rel", "0");
+    embed.searchParams.set("modestbranding", "1");
+    embed.searchParams.set("playsinline", "1");
+    embed.searchParams.set("autoplay", "0");
+    if (startSeconds > 0) {
+      embed.searchParams.set("start", String(Math.max(0, Math.floor(startSeconds))));
+    }
+    return embed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function toExternalTimestampUrl(url: string, seconds: number): string | null {
   if (isBilibiliUrl(url)) return toBilibiliWatchUrlAtTime(url, seconds);
   if (isYouTubeUrl(url)) return toYouTubeUrlAtTime(url, seconds);

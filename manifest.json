@@ -1,7 +1,7 @@
 {
   "id": "smart-media-notes",
   "name": "Smart Media Notes",
-  "version": "1.3.0",
+  "version": "1.3.2",
   "minAppVersion": "1.7.2",
   "description": "Video and audio note-taking with timestamps, subtitles, media library management, and optional yt-dlp direct playback sync for mobile-friendly workflows.",
   "author": "Jing",

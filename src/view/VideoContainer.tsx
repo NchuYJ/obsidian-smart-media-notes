@@ -9,7 +9,6 @@
  */
 
 import React, { useRef, useState, useEffect } from "react";
-import ReactPlayer from "react-player";
 import type { TFile } from "obsidian";
 import {
   SubtitleCue,
@@ -19,6 +18,8 @@ import {
   isBilibiliUrl,
   isHlsUrl,
   toBilibiliEmbedUrl,
+  isYouTubeUrl,
+  toYouTubeEmbedUrl,
 } from "../utils";
 import EmbedPlayer from "./players/EmbedPlayer";
 import HlsPlayer from "./players/HlsPlayer";
@@ -100,7 +101,9 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   const audio = isAudioProp ?? isAudioFile(url);
   const hls = isHlsUrl(url);
   const bilibili = !forceNativePlayer && isBilibiliUrl(url);
+  const youtube = !forceNativePlayer && isYouTubeUrl(url);
   const bilibiliEmbedUrl = bilibili ? toBilibiliEmbedUrl(url, start || 0) : null;
+  const youtubeEmbedUrl = youtube ? toYouTubeEmbedUrl(url, start || 0) : null;
 
   // 根据设置计算字体大小
   const sizeMap: Record<string, { text: string; ts: string }> = {
@@ -116,10 +119,10 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   useEffect(() => {
     setPlaying(false);
-    if (bilibili) return;
+    if (bilibili || youtube) return;
     const timer = window.setTimeout(() => setPlaying(true), 400);
     return () => window.clearTimeout(timer);
-  }, [bilibili, url]);
+  }, [bilibili, youtube, url]);
 
   useEffect(() => {
     const video = nativeVideoRef.current;
@@ -199,7 +202,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   // 播放器的尺寸策略：
   //   视频：width/height 100%，flex:1 撑满
-  //   音频：width 100%，height 固定 54px（react-player 音频控制栏高度）
+  //   音频：width 100%，height 固定 54px（紧凑音频控制栏高度）
   const playerStyle: React.CSSProperties = audio
     ? { width: "100%", height: "54px" }
     : { width: "100%", height: "100%" };
@@ -313,6 +316,19 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             start={start}
             onReady={onReady}
           />
+        ) : youtube ? (
+          <EmbedPlayer
+            key={url}
+            ref={playerRef}
+            embedUrl={youtubeEmbedUrl || toYouTubeEmbedUrl(url, 0) || url}
+            originalUrl={url}
+            title="YouTube"
+            playing={playing}
+            width={playerStyle.width ?? "100%"}
+            height={playerStyle.height ?? "100%"}
+            start={start}
+            onReady={onReady}
+          />
         ) : forceNativePlayer ? (
           <video
             key={url}
@@ -363,25 +379,53 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             }
           />
         ) : (
-          <ReactPlayer
+          <video
             key={url}
-            ref={(player) => {
-              playerRef.current = player;
+            ref={(video) => {
+              nativeVideoRef.current = video;
+              if (!video) {
+                playerRef.current = null;
+                return;
+              }
+              playerRef.current = {
+                seekTo(seconds: number) {
+                  video.currentTime = seconds;
+                },
+                getCurrentTime() {
+                  return video.currentTime || 0;
+                },
+                props: {
+                  playing,
+                },
+              };
             }}
-            url={url}
-            playing={playing}
-            controls={true}
-            width={playerStyle.width}
-            height={playerStyle.height}
-            onReady={onReady}
-            onProgress={handleProgress}
-            progressInterval={200}
-            onError={(err: unknown) =>
+            src={url}
+            controls
+            playsInline
+            style={{
+              width: playerStyle.width,
+              height: playerStyle.height,
+              display: "block",
+              backgroundColor: "black",
+            }}
+            onLoadedMetadata={onReady}
+            onCanPlay={() => {
+              if (playing) {
+                void nativeVideoRef.current?.play().catch(() => {
+                  // Autoplay can be blocked; controls remain visible.
+                });
+              }
+            }}
+            onTimeUpdate={(event) => {
+              handleProgress({
+                playedSeconds: (event.currentTarget as HTMLVideoElement).currentTime || 0,
+              });
+            }}
+            onError={() =>
               setupError(
-                err instanceof Error
-                  ? err.message
-                  :
-                  "Video is unplayable due to privacy settings, streaming permissions, etc.",
+                /^https?:\/\//i.test(url) && !/\.(mp4|m4v|mov|webm|mp3|m4a|aac|ogg|oga|wav|flac|opus|mkv|avi|wmv|ogv)(?:[/?#]|$)/i.test(url)
+                  ? "This URL is not a directly playable media file. Try resolving it with yt-dlp, using a direct media URL, or opening it externally."
+                  : "Video is unplayable due to privacy settings, streaming permissions, or unsupported media format.",
               )
             }
           />
