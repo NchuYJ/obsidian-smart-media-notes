@@ -647,7 +647,6 @@ export default class SmartMediaNotesPlugin extends Plugin {
           new PodcastModal(this.app, this, selectedUrl, editor).open();
         } else if (/^https?:\/\//i.test(selectedUrl)) {
           // 兜底：http/https URL 直接传给播放器（YouTube、流媒体等）
-          // react-player 能自动识别并播放这些 URL
           void this.activateView(selectedUrl, editor, null, {
             alias: selectedAlias,
             sourceUrl: selectedUrl,
