@@ -11,10 +11,24 @@
 import React, { useRef, useState, useEffect } from "react";
 import ReactPlayer from "react-player";
 import type { TFile } from "obsidian";
-import { SubtitleCue, findCueAtTime, formatSecondsAsTimestamp, isAudioFile } from "../utils";
+import {
+  SubtitleCue,
+  findCueAtTime,
+  formatSecondsAsTimestamp,
+  isAudioFile,
+  isBilibiliUrl,
+  isHlsUrl,
+  toBilibiliEmbedUrl,
+} from "../utils";
+import EmbedPlayer from "./players/EmbedPlayer";
+import HlsPlayer from "./players/HlsPlayer";
 
 interface PlayerHandle {
   seekTo(seconds: number): void;
+  getCurrentTime(): number;
+  props?: {
+    playing?: boolean;
+  };
 }
 
 // ---- 类型 ----
@@ -38,6 +52,8 @@ interface VideoContainerProps {
   onNavigatePlaylist?: (file: TFile) => void;
   // 由外部指定是否为音频（本地文件的 blob URL 无法通过扩展名检测）
   isAudio?: boolean;
+  // Direct URLs from yt-dlp often lack file extensions; avoid platform players.
+  forceNativePlayer?: boolean;
   // 听写模式
   dictationMode?: boolean;
   dictationLoopCount?: number;  // 0=无限
@@ -62,8 +78,10 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   dictationMode = false,
   dictationLoopCount = 0,
   dictationLoopGap = 0.5,
+  forceNativePlayer = false,
 }) => {
-  const playerRef = useRef<ReactPlayer | null>(null);
+  const playerRef = useRef<PlayerHandle | null>(null);
+  const nativeVideoRef = useRef<HTMLVideoElement | null>(null);
   const subtitleListRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [activeSubtitle, setActiveSubtitle] = useState<SubtitleCue | null>(null);
@@ -80,6 +98,9 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   // 音频模式：优先用外部传入的 isAudio（本地文件 blob URL 无法通过扩展名检测）
   const audio = isAudioProp ?? isAudioFile(url);
+  const hls = isHlsUrl(url);
+  const bilibili = !forceNativePlayer && isBilibiliUrl(url);
+  const bilibiliEmbedUrl = bilibili ? toBilibiliEmbedUrl(url, start || 0) : null;
 
   // 根据设置计算字体大小
   const sizeMap: Record<string, { text: string; ts: string }> = {
@@ -95,9 +116,22 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
   useEffect(() => {
     setPlaying(false);
+    if (bilibili) return;
     const timer = window.setTimeout(() => setPlaying(true), 400);
     return () => window.clearTimeout(timer);
-  }, [url]);
+  }, [bilibili, url]);
+
+  useEffect(() => {
+    const video = nativeVideoRef.current;
+    if (!video || !forceNativePlayer || hls) return;
+    if (playing) {
+      void video.play().catch(() => {
+        // Autoplay can be blocked; the visible controls still let users start playback.
+      });
+    } else {
+      video.pause();
+    }
+  }, [forceNativePlayer, hls, playing, url]);
 
   useEffect(() => {
     if (activeSubtitle && subtitleListRef.current) {
@@ -109,8 +143,9 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   // ---- 事件处理 ----
 
   const onReady = () => {
+    if (!playerRef.current) return;
     if (start) playerRef.current.seekTo(start);
-    if (playerRef) setupPlayer(playerRef.current, setPlaying);
+    setupPlayer(playerRef.current, setPlaying);
   };
 
   const handleProgress = (state: { playedSeconds: number }) => {
@@ -158,6 +193,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
   };
 
   const hasSubtitles = subtitles && subtitles.length > 0;
+  const reserveSubtitleBanner = Boolean(dictationMode || showSubtitleOverlay);
 
   // ---- 渲染 ----
 
@@ -210,6 +246,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             }}
           >
             <span
+              className="smn-subtitle-time"
               style={{
                 fontWeight: 600,
                 marginRight: "8px",
@@ -222,7 +259,10 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
               {formatSecondsAsTimestamp(cue.start)}
             </span>
             {/* 听写模式下隐藏文字，仅留时间轴供点击跳转 */}
-            <span style={dictationMode ? { visibility: "hidden" } : undefined}>
+            <span
+              className="smn-subtitle-text"
+              style={dictationMode ? { visibility: "hidden" } : undefined}
+            >
               {cue.text}
             </span>
           </div>
@@ -231,86 +271,187 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
     : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}>
+    <div
+      className="smn-video-container"
+      style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%" }}
+    >
       {/* 播放器容器 */}
-      <div style={playerWrapperStyle}>
-        <ReactPlayer
-          key={url}
-          ref={playerRef}
-          url={url}
-          playing={playing}
-          controls={true}
-          width={playerStyle.width}
-          height={playerStyle.height}
-          onReady={onReady}
-          onProgress={handleProgress}
-          progressInterval={200}
-          onError={(err: unknown) =>
-            setupError(
-              err instanceof Error
-                ? err.message
-                :
-                "Video is unplayable due to privacy settings, streaming permissions, etc.",
-            )
-          }
-        />
+      <div
+        className={
+          audio
+            ? "smn-player-wrapper is-audio"
+            : bilibili
+              ? "smn-player-wrapper is-embed"
+              : "smn-player-wrapper"
+        }
+        style={playerWrapperStyle}
+      >
+        {hls ? (
+          <HlsPlayer
+            key={url}
+            ref={playerRef}
+            url={url}
+            playing={playing}
+            width={playerStyle.width ?? "100%"}
+            height={playerStyle.height ?? "100%"}
+            start={start}
+            onReady={onReady}
+            onProgress={handleProgress}
+            progressInterval={200}
+            onError={setupError}
+          />
+        ) : bilibili ? (
+          <EmbedPlayer
+            key={url}
+            ref={playerRef}
+            embedUrl={bilibiliEmbedUrl || url}
+            originalUrl={url}
+            title="Bilibili"
+            playing={playing}
+            width={playerStyle.width ?? "100%"}
+            height={playerStyle.height ?? "100%"}
+            start={start}
+            onReady={onReady}
+          />
+        ) : forceNativePlayer ? (
+          <video
+            key={url}
+            ref={(video) => {
+              nativeVideoRef.current = video;
+              if (!video) {
+                playerRef.current = null;
+                return;
+              }
+              playerRef.current = {
+                seekTo(seconds: number) {
+                  video.currentTime = seconds;
+                },
+                getCurrentTime() {
+                  return video.currentTime || 0;
+                },
+                props: {
+                  playing,
+                },
+              };
+            }}
+            src={url}
+            controls
+            playsInline
+            style={{
+              width: playerStyle.width,
+              height: playerStyle.height,
+              display: "block",
+              backgroundColor: "black",
+            }}
+            onLoadedMetadata={onReady}
+            onCanPlay={() => {
+              if (playing) {
+                void nativeVideoRef.current?.play().catch(() => {
+                  // Autoplay can be blocked; controls remain visible.
+                });
+              }
+            }}
+            onTimeUpdate={(event) => {
+              handleProgress({
+                playedSeconds: (event.currentTarget as HTMLVideoElement).currentTime || 0,
+              });
+            }}
+            onError={() =>
+              setupError(
+                "This direct URL could not be played by Obsidian's native media element. Try refreshing the yt-dlp mapping, choosing iframe mode, or resolving with cookies if the site requires them.",
+              )
+            }
+          />
+        ) : (
+          <ReactPlayer
+            key={url}
+            ref={(player) => {
+              playerRef.current = player;
+            }}
+            url={url}
+            playing={playing}
+            controls={true}
+            width={playerStyle.width}
+            height={playerStyle.height}
+            onReady={onReady}
+            onProgress={handleProgress}
+            progressInterval={200}
+            onError={(err: unknown) =>
+              setupError(
+                err instanceof Error
+                  ? err.message
+                  :
+                  "Video is unplayable due to privacy settings, streaming permissions, etc.",
+              )
+            }
+          />
+        )}
       </div>
 
       {/* 当前字幕 banner — 始终占位，避免出现/消失时布局抖动 */}
-      <div
-        style={{
-          flex: "0 0 auto",
-          minHeight: "4.5em",
-          maxHeight: "4.5em",
-          overflow: "hidden",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 0,
-          padding: activeSubtitle && showSubtitleOverlay && !dictationMode ? "14px 16px" : 0,
-          borderTop: activeSubtitle && showSubtitleOverlay && !dictationMode
-            ? "1px solid var(--background-modifier-border)" : "none",
-          borderBottom: activeSubtitle && showSubtitleOverlay && !dictationMode
-            ? "1px solid var(--background-modifier-border)" : "none",
-          background: activeSubtitle && showSubtitleOverlay && !dictationMode
-            ? "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)"
-            : dictationMode
-              ? "var(--background-modifier-error)"
-              : "transparent",
-          color: "var(--text-normal)",
-          fontSize: fs.text,
-          lineHeight: "1.6",
-          fontWeight: 500,
-          transition: "padding 0.15s, border 0.15s, background 0.15s",
-        }}
-      >
-        {dictationMode ? (
-          <span style={{ fontSize: fs.ts, fontWeight: 700, color: "var(--text-error)",
-            textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            Dictation Mode — Listen and type in your note. Use "Reveal answer" to compare.
-          </span>
-        ) : activeSubtitle && showSubtitleOverlay ? (
-          <>
-            <span style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
-              color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
-              background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px",
-              flexShrink: 0, alignSelf: "flex-start" }}>
-              {formatSecondsAsTimestamp(activeSubtitle.start)}
+      {reserveSubtitleBanner && (
+        <div
+          className={
+            activeSubtitle && showSubtitleOverlay && !dictationMode
+              ? "smn-subtitle-banner has-subtitle"
+              : "smn-subtitle-banner is-empty"
+          }
+          style={{
+            flex: "0 0 auto",
+            minHeight: "4.5em",
+            maxHeight: "4.5em",
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 0,
+            padding: activeSubtitle && showSubtitleOverlay && !dictationMode ? "14px 16px" : 0,
+            borderTop: "1px solid var(--background-modifier-border)",
+            borderBottom: "1px solid var(--background-modifier-border)",
+            background: activeSubtitle && showSubtitleOverlay && !dictationMode
+              ? "linear-gradient(135deg, var(--background-primary) 0%, var(--background-secondary) 100%)"
+              : dictationMode
+                ? "var(--background-modifier-error)"
+                : "transparent",
+            color: "var(--text-normal)",
+            fontSize: fs.text,
+            lineHeight: "1.6",
+            fontWeight: 500,
+            transition: "background 0.15s",
+            userSelect: dictationMode ? "none" : "text",
+          }}
+        >
+          {dictationMode ? (
+            <span style={{ fontSize: fs.ts, fontWeight: 700, color: "var(--text-error)",
+              textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Dictation Mode — Listen and type in your note. Use "Reveal answer" to compare.
             </span>
-            <span style={{
-              display: "-webkit-box",
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: "vertical",
-              overflow: "hidden",
-            }}>
-              {activeSubtitle.text}
-            </span>
-          </>
-        ) : null}
-      </div>
+          ) : activeSubtitle && showSubtitleOverlay ? (
+            <>
+              <span className="smn-subtitle-banner-time" style={{ fontWeight: 700, marginRight: "12px", fontSize: fs.ts,
+                color: "var(--text-accent)", fontFamily: "var(--font-monospace)",
+                background: "var(--background-modifier-hover)", padding: "2px 8px", borderRadius: "4px",
+                flexShrink: 0, alignSelf: "flex-start", userSelect: "text" }}>
+                {formatSecondsAsTimestamp(activeSubtitle.start)}
+              </span>
+              <span className="smn-subtitle-banner-text" style={{
+                display: "-webkit-box",
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+                userSelect: "text",
+                cursor: "text",
+              }}>
+                {activeSubtitle.text}
+              </span>
+            </>
+          ) : null}
+        </div>
+      )}
 
       {/* 播放列表导航 */}
       {playlist && (
         <div
+          className="smn-playlist-nav"
           style={{
             flex: "0 0 auto",
             display: "flex",
@@ -324,6 +465,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
           }}
         >
           <button
+            className="smn-playlist-button"
             onClick={() => {
               if (playlist.currentIndex > 0)
                 onNavigatePlaylist?.(playlist.files[playlist.currentIndex - 1]);
@@ -346,6 +488,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             {playlist.currentIndex + 1} / {playlist.files.length}
           </span>
           <button
+            className="smn-playlist-button"
             onClick={() => {
               if (playlist.currentIndex < playlist.files.length - 1)
                 onNavigatePlaylist?.(playlist.files[playlist.currentIndex + 1]);
@@ -369,8 +512,9 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
 
       {/* 字幕浏览器 */}
       {hasSubtitles && showSubtitleBrowser && (
-        <div ref={subtitleListRef} style={subtitleStyle}>
+        <div ref={subtitleListRef} className="smn-subtitle-browser" style={subtitleStyle}>
           <div
+            className="smn-subtitle-browser-header"
             style={{
               padding: "5px 10px",
               fontSize: "10px",

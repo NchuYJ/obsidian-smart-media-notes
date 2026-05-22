@@ -1,42 +1,30 @@
 # Smart Media Notes Tutorial
 
-This tutorial walks through the most useful workflows in Smart Media Notes.
+This tutorial focuses on the fastest way to start taking video notes with Smart Media Notes.
 
-## 1. Open Your First Media Source
+## 1. Your First Video Note
 
-### From a web URL
+Create a note and add a `timestamp-url` block:
 
-Add a line like this to a note:
-
-```text
-https://example.com/audio.mp3
+````markdown
+```timestamp-url
+My lesson video | https://www.youtube.com/watch?v=example
 ```
+````
 
-Select it and run:
+You can use:
+
+- a web URL
+- a vault media path
+- a desktop file path
+
+Then click the rendered button or run:
 
 `Open media player (copy url or path and use hotkey)`
 
-### From a vault file
+## 2. Insert Timestamps While Watching
 
-Add a vault-relative path like:
-
-```text
-Attachments/audio/lesson-01.mp3
-```
-
-Select it and run the same command.
-
-### From a local system file
-
-On desktop, you can also use a direct file path:
-
-```text
-C:\Users\YourName\Music\lesson-01.mp3
-```
-
-## 2. Insert Clickable Timestamps
-
-While media is playing, run:
+While the media is playing, run:
 
 `Insert timestamp based on videos current play time`
 
@@ -48,19 +36,36 @@ This inserts:
 ```
 ````
 
-In reading mode, clicking the timestamp jumps the active player.
-
-## 3. Save a Reopenable Media Block
-
-Use a `timestamp-url` block when you want a note to permanently keep a launchable media reference:
+If you want a short heading with the timestamp, use:
 
 ````markdown
-```timestamp-url
-Episode 12 | https://example.com/podcast.mp3
+```timestamp
+#Vocabulary
+02:15
 ```
 ````
 
-You can also use a vault path or local file path.
+In reading mode, clicking the timestamp jumps the active player.
+
+## 3. Convert Existing Note Times
+
+If you already typed plain time text such as:
+
+```text
+1:23
+12:08
+1:02:03
+```
+
+select it and run:
+
+`Convert selected time text to timestamp block`
+
+This is especially useful when:
+
+- the player cannot report exact current time
+- you are working from a mobile device
+- you are reviewing notes after watching
 
 ## 4. Import Subtitles
 
@@ -68,79 +73,131 @@ You can also use a vault path or local file path.
 2. Run `Import subtitle file for current media`.
 3. Pick a `.srt` or `.vtt` file.
 
-After import:
+After import, Smart Media Notes can:
 
-- the subtitle overlay can appear during playback
-- the subtitle browser can appear below the player
-- clicking subtitle lines jumps playback
+- show the current subtitle under the video
+- show a subtitle browser below the player
+- jump when you click a subtitle line
+- insert the current subtitle into the note
 
-## 5. Insert the Current Subtitle Into Notes
+## 5. Use yt-dlp for Mobile-Friendly Video Notes
 
-When playback is on a subtitle line, run:
+This is one of the most important beta workflows.
 
-`Insert current subtitle with timestamp`
+### Why use it
 
-This uses your subtitle template from settings.
+Some websites give you a page link, not a raw media file. On mobile, those page links often open an external app instead of staying inside Obsidian.
 
-## 6. Use the Smart Media Library
+Smart Media Notes can use `yt-dlp` on desktop to resolve a direct stream URL, then save that mapping into the vault for later reuse.
+
+### How to do it
+
+1. Install `yt-dlp` on desktop.
+2. Open plugin settings.
+3. Enable `Use yt-dlp direct URL map`.
+4. Confirm `yt-dlp executable path` is correct.
+5. Select your video page URL in the note.
+6. Run:
+   `Resolve direct URL with yt-dlp`
+
+If the resolve succeeds, the mapping is written to:
+
+```text
+Subtitles/smart-media-notes-direct-url-map.json
+```
+
+If your vault syncs to mobile, that mapping can sync too.
+
+### Result
+
+Now the same note can often be reopened on mobile using Obsidian's own player instead of leaving the app.
+
+## 6. Mobile Timestamp Rail
+
+When a player opens on mobile, the note area can become narrow.
+
+Smart Media Notes can replace that squeezed note area with a timestamp rail so you can still work comfortably.
+
+### What it does
+
+- shows timestamp buttons for quick jumping
+- can show nearby note preview
+- can switch into edit mode by command
+
+### Useful commands
+
+- `Toggle mobile timestamp rail`
+- `Toggle mobile timestamp rail edit mode`
+
+### Preview vs edit
+
+By default, expanding a timestamp preview only shows nearby note content.
+
+It does **not** jump straight into editing.
+
+When you really want to edit from the rail, run:
+
+`Toggle mobile timestamp rail edit mode`
+
+Then expand a timestamp and the preview area becomes editable.
+
+## 7. Smart Media Library
 
 Open:
 
 `Open media library sidebar`
 
-The library includes:
+The library is your control center for media notes.
+
+It can manage:
 
 - Saved Media
+- Subtitles
 - RSS Subscriptions
 - Media Folders
 
 ### Saved Media
 
-Saved Media is built from the `timestamp-url` blocks in your notes and from tracked openings.
+Saved Media entries come from your notes and tracked openings.
 
-Use:
+Each item can help you:
 
-`Reconcile saved media collection`
+- reopen the media
+- jump to linked timestamps
+- upload or replace subtitles
+- choose `Direct` or `Original` playback mode
 
-if you want to rebuild the library from your vault notes.
+### Subtitles
 
-### RSS
+The library can show:
 
-Add RSS feeds in settings, one per line:
+- subtitle files mapped to media
+- unused subtitle files
+- missing mappings
 
-```text
-Office Ladies | https://feeds.megaphone.fm/office-ladies
-```
+This makes it easier to keep the vault clean over time.
 
-Then open the library sidebar and browse episodes.
+## 8. Reconcile When Things Change
 
-### Media Folders
+Run these commands after deleting or updating notes, URLs, or subtitle files:
 
-In settings, add:
+- `Reconcile saved media collection`
+- `Reconcile synced subtitle index`
 
-- vault folder paths
-- or desktop system folder paths
+These commands help keep the library and subtitle mapping files accurate.
 
-Examples:
+## 9. Voice Notes and Dictation
 
-```text
-Attachments/audio
-English/listening
-C:\Users\YourName\Music
-```
-
-## 7. Record Voice Notes
+### Voice notes
 
 Run:
 
 - `Start voice recording`
 - `Stop voice recording and save note`
 
-The plugin stores the audio file in your configured recordings folder and inserts a `voice-bar` block into the note.
+The plugin stores the audio in your vault and inserts a `voice-bar` block into the note.
 
-## 8. Use Dictation Mode
-
-Dictation mode is designed for listening and language practice.
+### Dictation mode
 
 Turn it on with:
 
@@ -149,50 +206,58 @@ Turn it on with:
 Then you can:
 
 - repeat the current subtitle segment
-- move to the previous segment
-- move to the next segment
-- type what you hear into your note
-- select your typed answer and run:
+- move to the previous or next segment
+- type what you hear
+- compare your answer with:
+  `Reveal dictation answer (compare with selected text)`
 
-`Reveal dictation answer (compare with selected text)`
+## 10. Recommended Setup
 
-## 9. Recommended Setup
-
-For a good daily workflow:
+For a strong daily setup:
 
 1. Set `Subtitle storage folder`
-2. Set `Voice recordings folder`
-3. Add your common RSS feeds
-4. Add your common media folders
-5. Enable `Subtitle overlay`
-6. Enable `Subtitle browser`
+2. Enable `Subtitle overlay`
+3. Enable `Subtitle browser`
+4. Enable `Mobile timestamp rail`
+5. Enable `Mobile timestamp note preview`
+6. Enable `Use yt-dlp direct URL map`
+7. Add your common vault media folders
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### The player opens but nothing plays
 
-- Check whether the URL is directly playable
-- Some websites block embedding or cross-origin playback
-- Try opening the direct media file URL instead of the page URL
+- The site may block direct playback
+- The resolved direct URL may have expired
+- The site may require cookies, headers, or unsupported streams
+- Switch the saved item back to `Original` mode in the library if needed
 
-### Local system files do not load
+### Mobile still opens an external app
 
-- Confirm the path is valid
-- Confirm the file extension is included in plugin settings
-- Desktop usage is recommended for system file workflows
+- Confirm the source actually has a resolved direct URL
+- Confirm the vault synced `smart-media-notes-direct-url-map.json`
+- Refresh the direct URL from desktop if the old one expired
 
 ### Subtitles do not appear
 
-- Make sure the subtitle file actually contains cues
+- Make sure the subtitle file contains cues
 - Reimport the subtitle file
-- Check whether the currently open media matches the subtitle binding
+- Check whether the current media matches the subtitle mapping
+- Run `Reconcile synced subtitle index`
 
 ### The library feels out of sync
 
 Run:
 
-`Reconcile saved media collection`
+- `Reconcile saved media collection`
+- `Reconcile synced subtitle index`
 
-## 11. Best Practice
+## 12. Best Practice
 
-Use `timestamp-url` blocks for sources you want to keep revisiting, and plain `timestamp` blocks for note anchors inside a single session. That gives you a clean mix of reusable media references and precise in-note playback points.
+For long-term media study, the cleanest workflow is:
+
+1. Put one `timestamp-url` block near the top of the note
+2. Keep all related `timestamp` blocks under that media section
+3. Import subtitles early
+4. Use the library to manage direct/original playback and subtitle files
+5. Use `yt-dlp` on desktop so mobile stays usable later

@@ -1,21 +1,120 @@
 # Smart Media Notes
 
-Smart Media Notes is an [Obsidian](https://obsidian.md) plugin for media-based note taking. It lets you open video and audio inside Obsidian, insert clickable timestamps, import subtitles, record voice notes, browse podcast feeds, and keep a reusable media library next to your notes.
+Smart Media Notes is an [Obsidian](https://obsidian.md) plugin for serious video and audio note-taking.
 
-This project builds on [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [@juliang22](https://github.com/juliang22), and extends it with a full media workflow for study, listening practice, research, and review.
+It turns Obsidian into a media study workspace where you can:
+
+- open video and audio beside your notes
+- bind notes to a media source with `timestamp-url`
+- insert clickable `timestamp` blocks while you study
+- import subtitles and jump by subtitle line
+- manage saved media, subtitles, RSS feeds, and media folders in one library
+- keep working on mobile instead of breaking your flow
+
+This project builds on [ObsidianTimestampNotes](https://github.com/juliang22/ObsidianTimestampNotes) by [@juliang22](https://github.com/juliang22), then expands it into a full media-notes workflow for language learning, research, lectures, interviews, podcasts, and long-form video study.
+
+## Why This Beta Matters
+
+This beta focuses on one big goal:
+
+**make video note-taking feel native inside Obsidian, including on mobile**
+
+The newest workflow highlights:
+
+- Better support for `.m3u8` / HLS playback
+- Better support for Bilibili links
+- Subtitle overlay plus subtitle browser
+- Smart Media Library for saved media and subtitle management
+- Mobile timestamp rail for quick timestamp jumping while the player is open
+- Optional `yt-dlp` direct URL resolution for supported sites
+
+That last point is especially important.
+
+For some sites, especially YouTube and other page-based video sources, Smart Media Notes can use `yt-dlp` on desktop to resolve a direct playable stream URL, save that mapping into your vault, and let mobile Obsidian reuse it later.
+
+That means your workflow can become:
+
+1. Resolve the direct URL once on desktop
+2. Sync the vault
+3. Open the same video note on mobile
+4. Watch inside Obsidian and keep taking notes without jumping out to another app
+
+## Core Workflow
+
+### 1. Bind a note to a media source
+
+Use a `timestamp-url` block:
+
+````markdown
+```timestamp-url
+Amy-Mashed potato and rice noodles | https://www.youtube.com/watch?v=example
+```
+````
+
+This creates a reopenable media button in reading mode and gives Smart Media Notes a source to associate with timestamps and subtitles.
+
+### 2. Watch and take notes
+
+While the media is open, run:
+
+`Insert timestamp based on videos current play time`
+
+This inserts:
+
+````markdown
+```timestamp
+00:42
+```
+````
+
+You can also add a subhead:
+
+````markdown
+```timestamp
+#Key idea
+00:42
+```
+````
+
+### 3. Import subtitles
+
+Run:
+
+`Import subtitle file for current media`
+
+Then you can:
+
+- show the current subtitle as an overlay
+- browse all subtitle lines below the player
+- click a subtitle line to jump playback
+- insert the current subtitle into your note
+
+### 4. Reopen later from the library
+
+Open:
+
+`Open media library sidebar`
+
+The library keeps your saved media entries, timestamps, subtitles, RSS subscriptions, vault media folders, and desktop media folders together in one place.
 
 ## What It Can Do
 
-- Open media from web URLs, vault files, and local system paths
+- Open media from web URLs, vault files, and desktop file paths
+- Play many direct video and audio URLs inside Obsidian
+- Play HLS streams from `.m3u8` when the stream allows browser/WebView playback
+- Open Bilibili video links and try direct playback when available
+- Resolve supported page links to direct streams with `yt-dlp`
+- Sync resolved direct URL mappings through the vault
 - Insert clickable `timestamp` and `timestamp-url` code blocks
-- Import `.srt` and `.vtt` subtitles and keep them synced with playback
-- Show a subtitle overlay and subtitle browser below the player
-- Record voice notes into your vault as inline `voice-bar` blocks
-- Save and reopen frequently used media from a Smart Media Library view
-- Browse podcast RSS feeds and launch episodes directly
+- Convert selected time text into timestamp blocks
+- Show subtitle overlay and subtitle browser
+- Manage subtitles inside the Smart Media Library
+- Record voice notes into the vault
+- Browse podcast RSS feeds
 - Browse vault media folders
-- Browse local system media folders on desktop
-- Use dictation mode for language learning and listening drills
+- Browse local desktop media folders
+- Use dictation mode for language learning
+- Use mobile timestamp rail while the player is open
 
 ## Install
 
@@ -53,77 +152,127 @@ into:
 {your-vault}/.obsidian/plugins/smart-media-notes/
 ```
 
-## Quick Start
+## yt-dlp Direct Playback
 
-### Open a media link
+`yt-dlp` is optional, but it unlocks one of the most useful beta workflows.
 
-1. Put a media URL or vault file path in your note.
-2. Select it.
-3. Run the command `Open media player (copy url or path and use hotkey)`.
+### What it does
 
-### Insert a timestamp
+For supported HTTP video page links, Smart Media Notes can ask `yt-dlp` to resolve a direct playable URL and save it into the vault.
 
-While media is playing, run:
+This helps when:
 
-`Insert timestamp based on videos current play time`
+- the original link is a page URL, not a raw media URL
+- mobile cannot use the normal embedded player
+- you want the same note to work across desktop and mobile
 
-This inserts:
+### What to do
 
-````markdown
-```timestamp
-01:23
+1. Install `yt-dlp` on your desktop system.
+2. In plugin settings, enable:
+   `Use yt-dlp direct URL map`
+3. If needed, set:
+   `yt-dlp executable path`
+4. Select a supported HTTP link in a note, then run:
+   `Resolve direct URL with yt-dlp`
+
+You can also refresh direct URLs from the Smart Media Library.
+
+### How sync works
+
+Resolved direct URLs are saved into:
+
+```text
+Subtitles/smart-media-notes-direct-url-map.json
 ```
-````
 
-Clicking the timestamp in reading mode seeks the active player.
+This file lives in your vault, so if your vault syncs across devices, the resolved mapping can sync too.
 
-### Bind a media source to a note
+### Important limitations
 
-You can also insert:
+- Some sites return direct links that expire and need refresh
+- Some sites require headers, cookies, or blocked cross-origin requests
+- Some sites only expose streams that Obsidian cannot play directly
+- YouTube direct playback is best-effort and depends on what `yt-dlp` can resolve into a browser-playable stream
 
-````markdown
-```timestamp-url
-Lesson 01 | https://example.com/audio.mp3
+If direct playback fails, you can switch a saved item back to `Original` mode in the Smart Media Library.
+
+## Mobile Workflow
+
+This beta puts much more emphasis on mobile than older versions.
+
+### Mobile video notes
+
+With a synced direct URL map, supported links can open in Obsidian's own player on mobile instead of always jumping to another app.
+
+### Mobile timestamp rail
+
+When the player squeezes the note area, Smart Media Notes can replace that narrow note pane with a timestamp rail so you can:
+
+- jump through timestamps quickly
+- preview nearby note content
+- optionally enter edit mode through a command
+
+### Why this matters
+
+It makes mobile note review feel closer to desktop:
+
+- player stays visible
+- timestamps stay reachable
+- notes stay connected to the media instead of being hidden behind app switches
+
+## Subtitles and Sync
+
+Imported subtitle files are stored in your vault subtitle folder, `Subtitles` by default.
+
+Smart Media Notes also writes a sync index:
+
+```text
+Subtitles/smart-media-notes-subtitles.json
 ```
-````
 
-or:
+That lets other devices reconnect media links to subtitle files even when plugin `data.json` is not synced.
 
-````markdown
-```timestamp-url
-https://example.com/audio.mp3
-```
-````
+Useful maintenance commands:
 
-Clicking the rendered button reopens the media.
+- `Reconcile synced subtitle index`
+- `Reconcile saved media collection`
+
+Use them after deleting or renaming:
+
+- subtitle files
+- media links
+- video notes
+- saved media entries
 
 ## Main Features
 
 ### Smart Media Player
 
-- Supports video and audio
-- Works with many web URLs through `react-player`
-- Works with Obsidian vault files
-- Supports direct local system file paths
+- supports video and audio
+- supports vault files and many direct media URLs
+- supports page-link workflows through `yt-dlp`
+- supports fallback behavior when embedding is blocked
 
-### Subtitle Support
+### Subtitle Tools
 
-- Import `.srt` or `.vtt`
-- Show current subtitle as an overlay
-- Show subtitles in a scrollable browser
-- Click a subtitle line to jump playback
-- Insert the current subtitle into your note
+- import `.srt` and `.vtt`
+- show current subtitle as overlay
+- browse subtitle rows below the player
+- click subtitle lines to jump
+- insert subtitle text into notes
+- manage subtitle mappings from the library
 
 ### Smart Media Library
 
-The library view can show:
+The library can manage:
 
-- saved media entries from your notes
+- saved media entries
+- timestamps linked to those entries
+- subtitle mappings and unused subtitle files
 - podcast RSS subscriptions
 - vault media folders
-- local system media folders
-
-Saved entries can be filtered by tags and reopened quickly.
+- local desktop media folders
 
 ### Voice Notes
 
@@ -141,7 +290,7 @@ Dictation mode is useful for language learning:
 
 - loop the current subtitle segment
 - move to previous or next segment
-- hide subtitle text while keeping time anchors
+- hide subtitle text while keeping timing anchors
 - reveal and compare typed text against the original subtitle
 
 ## Commands
@@ -150,56 +299,54 @@ Main commands include:
 
 - `Open media player (copy url or path and use hotkey)`
 - `Insert timestamp based on videos current play time`
-- `Pause player`
-- `Seek Forward`
-- `Seek Backward`
-- `Open local media file`
-- `Open media from vault`
+- `Convert selected time text to timestamp block`
 - `Open media library sidebar`
 - `Import subtitle file for current media`
 - `Insert current subtitle with timestamp`
-- `Start voice recording`
-- `Stop voice recording and save note`
+- `Resolve direct URL with yt-dlp`
+- `Reconcile saved media collection`
+- `Reconcile synced subtitle index`
+- `Toggle mobile timestamp rail`
+- `Toggle mobile timestamp rail edit mode`
 - `Toggle dictation mode`
 - `Reveal dictation answer (compare with selected text)`
-- `Dictation: Previous segment`
-- `Dictation: Next segment`
-- `Reconcile saved media collection`
+- `Start voice recording`
+- `Stop voice recording and save note`
 
 ## Settings
 
 Important settings:
 
-- `Title`
-- `URL Button Color`
-- `Timestamp Button Color`
-- `Forward time seek`
-- `Backwards time seek`
-- `Voice recordings folder`
-- `Subtitle note template`
+- `Use yt-dlp direct URL map`
+- `yt-dlp executable path`
+- `Subtitle storage folder`
 - `Subtitle overlay`
 - `Subtitle browser`
 - `Subtitle overlay font size`
-- `Dictation loop count`
-- `Dictation gap between repeats`
-- `Subtitle storage folder`
-- `RSS subscriptions`
-- `Video formats`
-- `Audio formats`
-- `Media folders`
+- `Mobile timestamp rail`
+- `Mobile timestamp note preview`
+- `Timestamp display format`
 - `Auto insert library note`
 - `Include subtitle with timestamp`
 - `Timestamp + subtitle template`
+- `Video formats`
+- `Audio formats`
+- `Media folders`
 
-## Desktop Notes
+## Best Use Cases
 
-The plugin works best on desktop.
+Smart Media Notes is especially good for:
 
-System file paths and system folder scanning are primarily intended for desktop workflows. If you only want vault-safe media browsing, use vault media files and vault folders.
+- language learning from subtitled video
+- lecture and course notes
+- interview review
+- documentary study
+- podcast study notes
+- research workflows that need timestamped evidence
 
 ## Tutorial
 
-For a more guided walkthrough, see [TUTORIAL.md](./TUTORIAL.md).
+For a guided walkthrough, see [TUTORIAL.md](./TUTORIAL.md).
 
 ## Development
 
@@ -216,6 +363,8 @@ src/
   main.ts
   settings.ts
   utils.ts
+  media/
+    bilibiliResolver.ts
   view/
     VideoContainer.tsx
     VideoView.tsx

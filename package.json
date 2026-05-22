@@ -1,16 +1,23 @@
 {
   "name": "obsidian-smart-media-notes",
-  "version": "1.2.1",
-  "description": "Media notes with timestamp, subtitle import, voice recording, and vault media browser.",
+  "version": "1.3.0",
+  "description": "Video and audio note-taking with timestamps, subtitles, media library management, and optional yt-dlp direct playback sync.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.js",
     "build": "node esbuild.config.js production"
   },
-  "keywords": ["obsidian", "obsidian-plugin", "media", "timestamp", "subtitle"],
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "media",
+    "timestamp",
+    "subtitle"
+  ],
   "author": "Jing",
   "license": "MIT",
   "dependencies": {
+    "hls.js": "^1.6.16",
     "react": "^18.1.0",
     "react-dom": "^18.1.0",
     "react-player": "^2.12.0"
