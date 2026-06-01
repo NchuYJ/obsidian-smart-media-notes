@@ -137,6 +137,8 @@ interface DirectUrlCandidate {
   mediaKind: "video" | "audio" | "hls";
 }
 
+type YtdlpQuality = "auto" | "best" | "1080" | "720" | "480" | "360";
+
 interface SubtitleReferenceIndex {
   keys: Set<string>;
   labelsByKey: Map<string, Set<string>>;
@@ -1585,8 +1587,20 @@ export default class SmartMediaNotesPlugin extends Plugin {
     return "video";
   }
 
-  private pickBrowserPlayableDirectUrl(info: YtdlpInfo, sourceUrl: string): DirectUrlCandidate | null {
-    const directCandidates: YtdlpFormat[] = [
+  private pickBestBrowserPlayableFormat(
+    formats: YtdlpFormat[],
+    sourceUrl: string,
+  ): YtdlpFormat | null {
+    const ranked = formats
+      .filter((item) => Boolean(item.url))
+      .map((format) => ({ format, score: this.scoreYtdlpFormat(format, sourceUrl) }))
+      .filter((item) => item.score >= 0)
+      .sort((a, b) => b.score - a.score);
+    return ranked[0]?.format || null;
+  }
+
+  private getYtdlpPrimaryFormats(info: YtdlpInfo): YtdlpFormat[] {
+    return [
       {
         url: info.url,
         ext: info.ext,
@@ -1597,18 +1611,58 @@ export default class SmartMediaNotesPlugin extends Plugin {
         height: info.height,
       },
       ...(info.requested_downloads || []),
+    ];
+  }
+
+  private pickBrowserPlayableDirectUrl(info: YtdlpInfo, sourceUrl: string): DirectUrlCandidate | null {
+    const requested = this.pickBestBrowserPlayableFormat(
+      this.getYtdlpPrimaryFormats(info),
+      sourceUrl,
+    );
+    const best =
+      requested ||
+      this.pickBestBrowserPlayableFormat(
+        [
+          ...this.getYtdlpPrimaryFormats(info),
       ...(info.formats || []),
-    ].filter((item) => Boolean(item.url));
-    const ranked = directCandidates
-      .map((format) => ({ format, score: this.scoreYtdlpFormat(format, sourceUrl) }))
-      .filter((item) => item.score >= 0)
-      .sort((a, b) => b.score - a.score);
-    const best = ranked[0]?.format;
+        ],
+        sourceUrl,
+      );
     if (!best?.url) return null;
     return {
       url: best.url,
       mediaKind: this.getYtdlpMediaKind(best),
     };
+  }
+
+  private normalizeYtdlpQuality(value: string | undefined): YtdlpQuality {
+    return ["auto", "best", "1080", "720", "480", "360"].includes(value || "")
+      ? (value as YtdlpQuality)
+      : "auto";
+  }
+
+  private getYtdlpFormatSelector(sourceUrl: string): string {
+    const quality = this.normalizeYtdlpQuality(this.settings.ytdlpQuality);
+    const progressiveVideo = "[vcodec!=none][acodec!=none]";
+    const mp4Progressive = `[ext=mp4]${progressiveVideo}`;
+    const webmProgressive = `[ext=webm]${progressiveVideo}`;
+
+    if (quality === "auto") {
+      return isYouTubeUrl(sourceUrl)
+        ? "best[protocol=https][ext=mp4][vcodec!=none][acodec!=none]/best[protocol=http][ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]"
+        : "best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]/best[protocol*=m3u8][vcodec!=none]/best[vcodec!=none]";
+    }
+
+    if (quality === "best") {
+      return `best${mp4Progressive}/best${webmProgressive}/best${progressiveVideo}`;
+    }
+
+    const maxHeight = Number(quality);
+    return [
+      `best${mp4Progressive}[height<=${maxHeight}]`,
+      `best${webmProgressive}[height<=${maxHeight}]`,
+      `best${progressiveVideo}[height<=${maxHeight}]`,
+    ].join("/");
   }
 
   private async runYtdlpJson(
@@ -1642,6 +1696,10 @@ export default class SmartMediaNotesPlugin extends Plugin {
       new Notice("yt-dlp direct URL resolving is only available on desktop.");
       return;
     }
+    if (isBilibiliUrl(url)) {
+      new Notice("Bilibili uses the existing experimental Bilibili direct playback setting.");
+      return;
+    }
     const childProcess = this.getNodeChildProcess();
     if (!childProcess?.execFile) {
       new Notice("Node child_process is unavailable in this Obsidian environment.");
@@ -1656,9 +1714,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
     const args = [
       ...baseArgs,
       "-f",
-      isYouTubeUrl(url)
-        ? "best[protocol=https][ext=mp4][vcodec!=none][acodec!=none]/best[protocol=http][ext=mp4][vcodec!=none][acodec!=none]/best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]"
-        : "best[ext=mp4][vcodec!=none][acodec!=none]/best[ext=webm][vcodec!=none][acodec!=none]/best[protocol*=m3u8][vcodec!=none]/best[vcodec!=none]",
+      this.getYtdlpFormatSelector(url),
       url,
     ];
     new Notice("Resolving direct URL with yt-dlp...");
@@ -1938,85 +1994,233 @@ export default class SmartMediaNotesPlugin extends Plugin {
       .join("\n");
   }
 
+  private cleanFeedText(value: string | null | undefined): string {
+    return (value || "")
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private getFeedElements(parent: Document | Element, tagNames: string[]): Element[] {
+    const elements: Element[] = [];
+    const seen = new Set<Element>();
+    const wanted = new Set(tagNames.map((tagName) => tagName.toLowerCase()));
+    const wantedLocal = new Set(
+      tagNames.map((tagName) => tagName.split(":").pop()!.toLowerCase()),
+    );
+
+    tagNames.forEach((tagName) => {
+      Array.from(parent.getElementsByTagName(tagName)).forEach((element) => {
+        if (!seen.has(element)) {
+          seen.add(element);
+          elements.push(element);
+        }
+      });
+    });
+
+    if (elements.length) return elements;
+
+    Array.from(parent.getElementsByTagName("*")).forEach((element) => {
+      const tagName = element.tagName.toLowerCase();
+      const localName = (element.localName || "").toLowerCase();
+      if (
+        !seen.has(element) &&
+        (wanted.has(tagName) || wantedLocal.has(localName))
+      ) {
+        seen.add(element);
+        elements.push(element);
+      }
+    });
+
+    return elements;
+  }
+
+  private getFeedElementText(parent: Document | Element, tagNames: string[]): string {
+    const element = this.getFeedElements(parent, tagNames)[0];
+    return this.cleanFeedText(element?.textContent || "");
+  }
+
+  private getFeedElementAttribute(
+    parent: Document | Element,
+    tagNames: string[],
+    attribute: string,
+  ): string {
+    for (const element of this.getFeedElements(parent, tagNames)) {
+      const value = element.getAttribute(attribute);
+      if (value) return value.trim();
+    }
+    return "";
+  }
+
+  private formatFeedDuration(rawDuration: string | null | undefined): string {
+    const raw = this.cleanFeedText(rawDuration);
+    if (!raw) return "";
+    const secs = raw.includes(":")
+      ? raw.split(":").reduce((total, part) => total * 60 + parseInt(part, 10), 0)
+      : parseInt(raw, 10);
+    if (isNaN(secs)) return "";
+    const minutes = Math.floor(secs / 60);
+    const seconds = secs % 60;
+    return minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+  }
+
+  private getAtomEntryUrl(entry: Element): string {
+    let fallbackHref = "";
+    for (const link of this.getFeedElements(entry, ["link"])) {
+      const href = link.getAttribute("href")?.trim();
+      if (!href) continue;
+      const rel = (link.getAttribute("rel") || "alternate").toLowerCase();
+      if (rel === "alternate") return href;
+      if (!fallbackHref) fallbackHref = href;
+    }
+    if (fallbackHref) return fallbackHref;
+
+    const videoId = this.getFeedElementText(entry, ["yt:videoId", "videoId"]);
+    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : "";
+  }
+
+  private parseFeedWithDom(text: string): { feedTitle: string; episodes: PodcastEpisode[] } | null {
+    if (typeof DOMParser === "undefined") return null;
+    const document = new DOMParser().parseFromString(text, "text/xml");
+    if (document.getElementsByTagName("parsererror").length) return null;
+
+    const feedTitle =
+      this.getFeedElementText(document.documentElement, ["title"]) || "Podcast";
+    const episodes: PodcastEpisode[] = [];
+
+    this.getFeedElements(document, ["item"]).forEach((item) => {
+      const url =
+        this.getFeedElementAttribute(item, ["enclosure"], "url") ||
+        this.getFeedElementAttribute(item, ["media:content", "content"], "url");
+      if (!url) return;
+      episodes.push({
+        title: this.getFeedElementText(item, ["title"]) || "Untitled",
+        url,
+        date: this.getFeedElementText(item, ["pubDate", "published", "updated"]),
+        duration: this.formatFeedDuration(
+          this.getFeedElementText(item, ["itunes:duration", "duration"]) ||
+            this.getFeedElementAttribute(item, ["media:content", "content"], "duration"),
+        ),
+        description: this.getFeedElementText(item, [
+          "description",
+          "media:description",
+          "summary",
+        ]).slice(0, 160),
+      });
+    });
+
+    this.getFeedElements(document, ["entry"]).forEach((entry) => {
+      const url = this.getAtomEntryUrl(entry);
+      if (!url) return;
+      episodes.push({
+        title: this.getFeedElementText(entry, ["media:title", "title"]) || "Untitled",
+        url,
+        date: this.getFeedElementText(entry, ["published", "updated"]),
+        duration: this.formatFeedDuration(
+          this.getFeedElementAttribute(entry, ["media:content", "content"], "duration"),
+        ),
+        description: this.getFeedElementText(entry, [
+          "media:description",
+          "summary",
+          "description",
+        ]).slice(0, 160),
+      });
+    });
+
+    return { feedTitle, episodes };
+  }
+
+  private parseFeedWithRegex(text: string): { feedTitle: string; episodes: PodcastEpisode[] } {
+    const feedTitleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    const feedTitle = feedTitleMatch
+      ? this.cleanFeedText(feedTitleMatch[1])
+      : "Podcast";
+    const episodes: PodcastEpisode[] = [];
+    let idx = 0;
+
+    while (idx < text.length) {
+      const itemStart = text.indexOf("<item", idx);
+      if (itemStart === -1) break;
+      const itemEnd = text.indexOf("</item>", itemStart);
+      if (itemEnd === -1) break;
+      const itemText = text.slice(itemStart, itemEnd + 7);
+      const titleMatch = itemText.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const encMatch =
+        itemText.match(/<enclosure[^>]*url="([^"]+)"/i) ||
+        itemText.match(/<media:content[^>]*url="([^"]+)"/i);
+      const dateMatch = itemText.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i);
+      const durMatch =
+        itemText.match(/<itunes:duration[^>]*>([^<]+)<\/itunes:duration>/i) ||
+        itemText.match(/<duration[^>]*>([^<]+)<\/duration>/i) ||
+        itemText.match(/<media:content[^>]*duration="([^"]+)"/i);
+      const descMatch =
+        itemText.match(/<description[^>]*>([\s\S]*?)<\/description>/i) ||
+        itemText.match(/<media:description[^>]*>([\s\S]*?)<\/media:description>/i);
+      if (encMatch) {
+        episodes.push({
+          title: titleMatch ? this.cleanFeedText(titleMatch[1]) : "Untitled",
+          url: encMatch[1],
+          date: dateMatch ? this.cleanFeedText(dateMatch[1]) : "",
+          duration: this.formatFeedDuration(durMatch?.[1]),
+          description: descMatch ? this.cleanFeedText(descMatch[1]).slice(0, 160) : "",
+        });
+      }
+      idx = itemEnd + 7;
+    }
+
+    idx = 0;
+    while (idx < text.length) {
+      const entryStart = text.indexOf("<entry", idx);
+      if (entryStart === -1) break;
+      const entryEnd = text.indexOf("</entry>", entryStart);
+      if (entryEnd === -1) break;
+      const entryText = text.slice(entryStart, entryEnd + 8);
+      const videoIdMatch = entryText.match(/<yt:videoId[^>]*>([\s\S]*?)<\/yt:videoId>/i);
+      const linkTagMatch =
+        entryText.match(/<link\b[^>]*rel="alternate"[^>]*>/i) ||
+        entryText.match(/<link\b[^>]*>/i);
+      const hrefMatch = linkTagMatch?.[0].match(/\bhref="([^"]+)"/i);
+      const titleMatch =
+        entryText.match(/<media:title[^>]*>([\s\S]*?)<\/media:title>/i) ||
+        entryText.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const dateMatch =
+        entryText.match(/<published[^>]*>([\s\S]*?)<\/published>/i) ||
+        entryText.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
+      const descMatch =
+        entryText.match(/<media:description[^>]*>([\s\S]*?)<\/media:description>/i) ||
+        entryText.match(/<summary[^>]*>([\s\S]*?)<\/summary>/i);
+      const durMatch = entryText.match(/<media:content[^>]*duration="([^"]+)"/i);
+      const url = hrefMatch?.[1] ||
+        (videoIdMatch ? `https://www.youtube.com/watch?v=${this.cleanFeedText(videoIdMatch[1])}` : "");
+      if (url) {
+        episodes.push({
+          title: titleMatch ? this.cleanFeedText(titleMatch[1]) : "Untitled",
+          url,
+          date: dateMatch ? this.cleanFeedText(dateMatch[1]) : "",
+          duration: this.formatFeedDuration(durMatch?.[1]),
+          description: descMatch ? this.cleanFeedText(descMatch[1]).slice(0, 160) : "",
+        });
+      }
+      idx = entryEnd + 8;
+    }
+
+    return { feedTitle, episodes };
+  }
+
   async fetchPodcastEpisodes(
     feedUrl: string,
   ): Promise<{ feedTitle: string; episodes: PodcastEpisode[]; error: string | null }> {
     try {
       const response = await requestUrl(feedUrl);
       const text = response.text;
-      const feedTitleMatch = text.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-      const feedTitle = feedTitleMatch
-        ? feedTitleMatch[1].replace(/<[^>]+>/g, "").trim()
-        : "Podcast";
-      const episodes: PodcastEpisode[] = [];
-      let idx = 0;
-      while (idx < text.length) {
-        const itemStart = text.indexOf("<item", idx);
-        if (itemStart === -1) break;
-        const itemEnd = text.indexOf("</item>", itemStart);
-        if (itemEnd === -1) break;
-        const itemText = text.slice(itemStart, itemEnd + 7);
-        const titleMatch = itemText.match(
-          /<title[^>]*>([\s\S]*?)<\/title>/i,
-        );
-        const encMatch = itemText.match(/<enclosure[^>]*url="([^"]+)"/i);
-        const dateMatch = itemText.match(
-          /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i,
-        );
-        const durMatch =
-          itemText.match(
-            /<itunes:duration[^>]*>([^<]+)<\/itunes:duration>/i,
-          ) ||
-          itemText.match(/<duration[^>]*>([^<]+)<\/duration>/i);
-        const descMatch = itemText.match(
-          /<description[^>]*>([\s\S]*?)<\/description>/i,
-        );
-        if (encMatch) {
-          let duration = "";
-          if (durMatch) {
-            const raw = durMatch[1].trim();
-            const secs = raw.includes(":")
-              ? raw.split(":").reduce((a, b) => a * 60 + parseInt(b), 0)
-              : parseInt(raw);
-            if (!isNaN(secs)) {
-              const m = Math.floor(secs / 60);
-              const s = secs % 60;
-              duration = m + ":" + (s < 10 ? "0" : "") + s;
-            }
-          }
-          episodes.push({
-            title: titleMatch
-              ? titleMatch[1].replace(/<[^>]+>/g, "").trim()
-              : "Untitled",
-            url: encMatch[1],
-            date: dateMatch ? dateMatch[1].trim() : "",
-            duration,
-            description: descMatch
-              ? descMatch[1].replace(/<[^>]+>/g, "").trim().slice(0, 160)
-              : "",
-          });
-        }
-        idx = itemEnd + 7;
-      }
-      if (!episodes.length) {
-        const encMatches = [
-          ...text.matchAll(/<enclosure[^>]*url="([^"]+)"/gi),
-        ];
-        encMatches.forEach((m, i) => {
-          episodes.push({
-            title: "Episode " + (i + 1),
-            url: m[1],
-            date: "",
-            duration: "",
-            description: "",
-          });
-        });
-      }
+      const parsed = this.parseFeedWithDom(text) || this.parseFeedWithRegex(text);
+      const { feedTitle, episodes } = parsed;
       if (!episodes.length) {
         return {
           feedTitle,
           episodes: [],
-          error: "No playable episodes found in this feed.",
+          error: "No playable videos or episodes found in this feed.",
         };
       }
       return { feedTitle, episodes, error: null };
@@ -3001,6 +3205,7 @@ export default class SmartMediaNotesPlugin extends Plugin {
           data.directPlayback ?? data.youtubeDirectPlayback ?? DEFAULT_SETTINGS.directPlayback,
         ytdlpPath:
           data.ytdlpPath || data.youtubeDlpPath || DEFAULT_SETTINGS.ytdlpPath,
+        ytdlpQuality: data.ytdlpQuality || DEFAULT_SETTINGS.ytdlpQuality,
         urlStartTimeMap: map,
         // 强制字幕缓存为空 — 从磁盘文件按需加载
         subtitleLibrary: {},
@@ -3115,90 +3320,10 @@ class PodcastModal extends Modal {
   async loadFeed(): Promise<void> {
     const { contentEl } = this;
     try {
-      const response = await requestUrl(this.feedUrl);
-      const text = response.text;
-      const feedTitleMatch = text.match(
-        /<title[^>]*>([\s\S]*?)<\/title>/i,
-      );
-      this.feedTitle = feedTitleMatch
-        ? feedTitleMatch[1].replace(/<[^>]+>/g, "").trim()
-        : "Podcast";
-      const episodes: PodcastEpisode[] = [];
-      let idx = 0;
-      while (idx < text.length) {
-        const itemStart = text.indexOf("<item", idx);
-        if (itemStart === -1) break;
-        const itemEnd = text.indexOf("</item>", itemStart);
-        if (itemEnd === -1) break;
-        const itemText = text.slice(itemStart, itemEnd + 7);
-        const titleMatch = itemText.match(
-          /<title[^>]*>([\s\S]*?)<\/title>/i,
-        );
-        const encMatch = itemText.match(
-          /<enclosure[^>]*url="([^"]+)"/i,
-        );
-        const dateMatch = itemText.match(
-          /<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i,
-        );
-        const durMatch =
-          itemText.match(
-            /<itunes:duration[^>]*>([^<]+)<\/itunes:duration>/i,
-          ) ||
-          itemText.match(/<duration[^>]*>([^<]+)<\/duration>/i);
-        const descMatch = itemText.match(
-          /<description[^>]*>([\s\S]*?)<\/description>/i,
-        );
-        if (encMatch) {
-          let duration = "";
-          if (durMatch) {
-            const raw = durMatch[1].trim();
-            const secs = raw.includes(":")
-              ? raw
-                  .split(":")
-                  .reduce((a, b) => a * 60 + parseInt(b), 0)
-              : parseInt(raw);
-            if (!isNaN(secs)) {
-              const m = Math.floor(secs / 60);
-              const s = secs % 60;
-              duration = m + ":" + (s < 10 ? "0" : "") + s;
-            }
-          }
-          episodes.push({
-            title: titleMatch
-              ? titleMatch[1].replace(/<[^>]+>/g, "").trim()
-              : "Untitled",
-            url: encMatch[1],
-            date: dateMatch ? dateMatch[1].trim() : "",
-            duration,
-            description: descMatch
-              ? descMatch[1]
-                  .replace(/<[^>]+>/g, "")
-                  .trim()
-                  .slice(0, 160)
-              : "",
-          });
-        }
-        idx = itemEnd + 7;
-      }
-      this.episodes = episodes;
-      if (!episodes.length) {
-        const encMatches = [
-          ...text.matchAll(/<enclosure[^>]*url="([^"]+)"/gi),
-        ];
-        encMatches.forEach((m, i) => {
-          episodes.push({
-            title: "Episode " + (i + 1),
-            url: m[1],
-            date: "",
-            duration: "",
-            description: "",
-          });
-        });
-        this.episodes = episodes;
-      }
-      if (!this.episodes.length) {
-        this.error = "No playable episodes found in this feed.";
-      }
+      const result = await this.plugin.fetchPodcastEpisodes(this.feedUrl);
+      this.feedTitle = result.feedTitle;
+      this.episodes = result.episodes;
+      this.error = result.error;
     } catch (e) {
       this.error =
         "Failed to load podcast feed. The server may block cross-origin requests.";

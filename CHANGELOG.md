@@ -6,6 +6,21 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [1.3.3] — YouTube RSS and Direct Playback Quality
+
+### Added
+- YouTube channel RSS feeds now parse Atom video entries from `feeds/videos.xml` and open videos from subscription rows.
+- `yt-dlp default quality` setting adds Auto, Best, 1080p, 720p, 480p, and 360p-or-lower direct URL preferences.
+
+### Changed
+- `yt-dlp` direct URL resolution now respects the selected format returned by yt-dlp before falling back to automatic format discovery.
+- Bilibili links continue through the existing experimental Bilibili direct playback path instead of the generic yt-dlp command.
+
+### Fixed
+- YouTube embedded playback now uses the YouTube IFrame API for real current-time capture, so timestamp hotkeys no longer insert `00:00`.
+
+---
+
 ## [1.3.2] — Review Fixes and Mobile Rail Polish
 
 ### Changed

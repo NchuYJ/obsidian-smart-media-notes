@@ -43,6 +43,7 @@ export interface SmartMediaNotesSettings {
   directPlayback: boolean;
   directPlaybackOverrides: Record<string, boolean>;
   ytdlpPath: string;
+  ytdlpQuality: string;
   autoInsertLibraryNote: boolean;
   timestampCollection: TimestampEntry[];
   subtitleFileMap: Record<string, string>;
@@ -79,6 +80,7 @@ export const DEFAULT_SETTINGS: Partial<SmartMediaNotesSettings> = {
   directPlayback: true,
   directPlaybackOverrides: {},
   ytdlpPath: "yt-dlp",
+  ytdlpQuality: "auto",
   autoInsertLibraryNote: false,
   timestampCollection: [],
   subtitleFileMap: {},
@@ -133,6 +135,15 @@ const LOOP_GAPS: Record<string, string> = {
   "1": "1 sec",
   "1.5": "1.5 sec",
   "2": "2 sec",
+};
+
+const YTDLP_QUALITY_OPTIONS: Record<string, string> = {
+  auto: "Auto",
+  best: "Best",
+  "1080": "1080p or lower",
+  "720": "720p or lower",
+  "480": "480p or lower",
+  "360": "360p or lower",
 };
 
 export class TimestampPluginSettingTab extends PluginSettingTab {
@@ -507,6 +518,21 @@ export class TimestampPluginSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.ytdlpPath || "yt-dlp")
           .onChange(async (value) => {
             this.plugin.settings.ytdlpPath = value.trim() || "yt-dlp";
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("yt-dlp default quality")
+      .setDesc(
+        "Preferred quality for resolved direct URLs. If unavailable, the command falls back to automatic format discovery.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions(YTDLP_QUALITY_OPTIONS)
+          .setValue(this.plugin.settings.ytdlpQuality || "auto")
+          .onChange(async (value) => {
+            this.plugin.settings.ytdlpQuality = value;
             await this.plugin.saveSettings();
           }),
       );

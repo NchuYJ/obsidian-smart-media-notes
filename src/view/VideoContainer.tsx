@@ -315,6 +315,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             height={playerStyle.height ?? "100%"}
             start={start}
             onReady={onReady}
+            onProgress={handleProgress}
           />
         ) : youtube ? (
           <EmbedPlayer
@@ -328,6 +329,7 @@ const VideoContainer: React.FC<VideoContainerProps> = ({
             height={playerStyle.height ?? "100%"}
             start={start}
             onReady={onReady}
+            onProgress={handleProgress}
           />
         ) : forceNativePlayer ? (
           <video
