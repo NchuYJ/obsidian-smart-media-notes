@@ -26,68 +26,6 @@ interface EmbedPlayerProps {
   onProgress?: (state: { playedSeconds: number }) => void;
 }
 
-interface YouTubePlayer {
-  getCurrentTime(): number;
-  seekTo(seconds: number, allowSeekAhead?: boolean): void;
-  destroy(): void;
-  playVideo?(): void;
-  pauseVideo?(): void;
-}
-
-interface YouTubePlayerConstructor {
-  new (
-    element: HTMLElement,
-    options: {
-      videoId: string;
-      playerVars: Record<string, string | number>;
-      events: {
-        onReady: () => void;
-        onStateChange?: () => void;
-      };
-    },
-  ): YouTubePlayer;
-}
-
-declare global {
-  interface Window {
-    YT?: {
-      Player?: YouTubePlayerConstructor;
-    };
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-let youtubeApiPromise: Promise<void> | null = null;
-
-function loadYouTubeIframeApi(): Promise<void> {
-  if (window.YT?.Player) return Promise.resolve();
-  if (youtubeApiPromise) return youtubeApiPromise;
-
-  youtubeApiPromise = new Promise((resolve, reject) => {
-    const previousReady = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previousReady?.();
-      resolve();
-    };
-
-    const existingScript = document.querySelector<HTMLScriptElement>(
-      'script[src="https://www.youtube.com/iframe_api"]',
-    );
-    if (existingScript) {
-      existingScript.addEventListener("error", () => reject(new Error("YouTube API failed to load")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    script.async = true;
-    script.onerror = () => reject(new Error("YouTube API failed to load"));
-    document.head.appendChild(script);
-  });
-
-  return youtubeApiPromise;
-}
-
 function getYouTubeVideoId(url: string): string {
   try {
     const parsed = new URL(url);
@@ -107,6 +45,17 @@ function getYouTubeVideoId(url: string): string {
   }
 }
 
+function withYouTubeJsApi(embedUrl: string): string {
+  try {
+    const url = new URL(embedUrl);
+    url.searchParams.set("enablejsapi", "1");
+    url.searchParams.set("origin", window.location.origin);
+    return url.toString();
+  } catch {
+    return embedUrl;
+  }
+}
+
 const EmbedPlayer = forwardRef<EmbedPlayerHandle, EmbedPlayerProps>(
   (
     {
@@ -121,82 +70,70 @@ const EmbedPlayer = forwardRef<EmbedPlayerHandle, EmbedPlayerProps>(
     },
     ref,
   ) => {
-    const [frameUrl, setFrameUrl] = useState(embedUrl);
-    const [apiFallback, setApiFallback] = useState(false);
+    const youtubeVideoId = getYouTubeVideoId(originalUrl) || getYouTubeVideoId(embedUrl);
+    const useYouTubeMessaging = title.toLowerCase() === "youtube" && Boolean(youtubeVideoId);
+    const initialFrameUrl = useYouTubeMessaging ? withYouTubeJsApi(embedUrl) : embedUrl;
+    const [frameUrl, setFrameUrl] = useState(initialFrameUrl);
     const currentSecondsRef = useRef(start || 0);
     const onReadyRef = useRef(onReady);
     const onProgressRef = useRef(onProgress);
-    const youtubeContainerRef = useRef<HTMLDivElement | null>(null);
-    const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
-    const youtubeVideoId = getYouTubeVideoId(originalUrl) || getYouTubeVideoId(embedUrl);
-    const useYouTubeApi = title.toLowerCase() === "youtube" && Boolean(youtubeVideoId) && !apiFallback;
+    const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
     useEffect(() => {
       onReadyRef.current = onReady;
       onProgressRef.current = onProgress;
     }, [onProgress, onReady]);
 
+    const postYouTubeMessage = (message: Record<string, unknown>) => {
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify(message), "*");
+    };
+
+    const sendYouTubeCommand = (func: string, args: unknown[] = []) => {
+      postYouTubeMessage({ event: "command", func, args });
+    };
+
+    const requestYouTubeProgress = () => {
+      postYouTubeMessage({ event: "listening", id: "smart-media-notes" });
+      sendYouTubeCommand("getCurrentTime");
+    };
+
     useEffect(() => {
-      if (!useYouTubeApi || !youtubeContainerRef.current) return;
+      if (!useYouTubeMessaging) return;
 
-      let cancelled = false;
-      let progressTimer: number | null = null;
-
-      loadYouTubeIframeApi()
-        .then(() => {
-          if (cancelled || !youtubeContainerRef.current || !window.YT?.Player) return;
-          youtubePlayerRef.current?.destroy();
-          youtubePlayerRef.current = new window.YT.Player(youtubeContainerRef.current, {
-            videoId: youtubeVideoId,
-            playerVars: {
-              autoplay: 0,
-              modestbranding: 1,
-              playsinline: 1,
-              rel: 0,
-              start: Math.max(0, Math.floor(start || 0)),
-            },
-            events: {
-              onReady: () => {
-                onReadyRef.current();
-                progressTimer = window.setInterval(() => {
-                  const currentTime = youtubePlayerRef.current?.getCurrentTime() || 0;
-                  if (Number.isFinite(currentTime)) {
-                    currentSecondsRef.current = currentTime;
-                    onProgressRef.current?.({ playedSeconds: currentTime });
-                  }
-                }, 500);
-              },
-              onStateChange: () => {
-                const currentTime = youtubePlayerRef.current?.getCurrentTime() || 0;
-                if (Number.isFinite(currentTime)) {
-                  currentSecondsRef.current = currentTime;
-                  onProgressRef.current?.({ playedSeconds: currentTime });
-                }
-              },
-            },
-          });
-        })
-        .catch(() => setApiFallback(true));
-
-      return () => {
-        cancelled = true;
-        if (progressTimer !== null) window.clearInterval(progressTimer);
-        youtubePlayerRef.current?.destroy();
-        youtubePlayerRef.current = null;
+      const handleMessage = (event: MessageEvent) => {
+        if (!/https:\/\/www\.youtube(?:-nocookie)?\.com$/.test(event.origin)) return;
+        let data: { event?: string; info?: { currentTime?: number } } | null = null;
+        try {
+          data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        } catch {
+          return;
+        }
+        const currentTime = data?.info?.currentTime;
+        if (typeof currentTime === "number" && Number.isFinite(currentTime)) {
+          currentSecondsRef.current = currentTime;
+          onProgressRef.current?.({ playedSeconds: currentTime });
+        }
       };
-    }, [start, useYouTubeApi, youtubeVideoId]);
+
+      window.addEventListener("message", handleMessage);
+      const timer = window.setInterval(requestYouTubeProgress, 500);
+      return () => {
+        window.removeEventListener("message", handleMessage);
+        window.clearInterval(timer);
+      };
+    }, [useYouTubeMessaging]);
 
     useImperativeHandle(ref, () => ({
       seekTo(seconds: number) {
         const safeSeconds = Math.max(0, Math.floor(seconds || 0));
         currentSecondsRef.current = safeSeconds;
-        if (youtubePlayerRef.current) {
-          youtubePlayerRef.current.seekTo(safeSeconds, true);
+        if (useYouTubeMessaging) {
+          sendYouTubeCommand("seekTo", [safeSeconds, true]);
           onProgressRef.current?.({ playedSeconds: safeSeconds });
           return;
         }
         try {
-          const nextUrl = new URL(embedUrl);
+          const nextUrl = new URL(initialFrameUrl);
           nextUrl.searchParams.set("t", String(safeSeconds));
           nextUrl.searchParams.set("start_progress", String(safeSeconds * 1000));
           nextUrl.searchParams.set("autoplay", "1");
@@ -206,16 +143,13 @@ const EmbedPlayer = forwardRef<EmbedPlayerHandle, EmbedPlayerProps>(
         }
       },
       getCurrentTime() {
-        const currentTime = youtubePlayerRef.current?.getCurrentTime();
-        if (typeof currentTime === "number" && Number.isFinite(currentTime)) {
-          currentSecondsRef.current = currentTime;
-        }
+        if (useYouTubeMessaging) requestYouTubeProgress();
         return currentSecondsRef.current;
       },
       props: {
         playing: false,
       },
-    }), [embedUrl, onProgress]);
+    }), [initialFrameUrl, useYouTubeMessaging]);
 
     const openExternally = () => {
       window.open(originalUrl, "_blank", "noopener,noreferrer");
@@ -225,26 +159,29 @@ const EmbedPlayer = forwardRef<EmbedPlayerHandle, EmbedPlayerProps>(
       <div className="smn-embed-player" style={{ width, height }}>
         <div className="smn-embed-toolbar">
           <span className="smn-embed-title">{title}</span>
-          <span className="smn-embed-clock" title={useYouTubeApi ? "Current playback time is available for timestamps" : "Iframe players only expose timestamp jumps"}>
-            {useYouTubeApi ? "Timestamp capture supported" : "Timestamp jump supported"}
+          <span className="smn-embed-clock" title={useYouTubeMessaging ? "Current playback time is available for timestamps" : "Iframe players only expose timestamp jumps"}>
+            {useYouTubeMessaging ? "Timestamp capture supported" : "Timestamp jump supported"}
           </span>
           <button className="smn-embed-external" onClick={openExternally}>
             Open externally
           </button>
         </div>
-        {useYouTubeApi ? (
-          <div className="smn-embed-frame" ref={youtubeContainerRef} />
-        ) : (
-          <iframe
-            className="smn-embed-frame"
-            src={frameUrl}
-            title={title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            allowFullScreen
-            referrerPolicy="no-referrer-when-downgrade"
-            onLoad={onReady}
-          />
-        )}
+        <iframe
+          ref={iframeRef}
+          className="smn-embed-frame"
+          src={frameUrl}
+          title={title}
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          allowFullScreen
+          referrerPolicy="no-referrer-when-downgrade"
+          onLoad={() => {
+            onReady();
+            if (useYouTubeMessaging) {
+              requestYouTubeProgress();
+              if (start) sendYouTubeCommand("seekTo", [Math.max(0, Math.floor(start)), true]);
+            }
+          }}
+        />
       </div>
     );
   },

@@ -6,6 +6,13 @@ The project started on 2026-05-14 and was developed over two days of intensive i
 
 ---
 
+## [1.3.4] — Obsidian Review Fix
+
+### Fixed
+- YouTube timestamp capture no longer dynamically injects the YouTube IFrame API script; it now uses the embedded iframe's `postMessage` channel to satisfy Obsidian plugin review requirements.
+
+---
+
 ## [1.3.3] — YouTube RSS and Direct Playback Quality
 
 ### Added
